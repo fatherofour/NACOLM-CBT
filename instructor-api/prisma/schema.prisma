@@ -31,6 +31,43 @@ enum DocumentType {
   STUDY_MATERIAL
 }
 
+enum UserRole {
+  INSTRUCTOR
+  EXAM_OFFICER
+}
+
+// Portal users. Passwords are scrypt hashes (see src/auth/password.ts);
+// accounts are created with scripts/create-user.mjs, not self-registration.
+model User {
+  id            String        @id @default(cuid())
+  serviceNumber String        @unique
+  rank          String
+  fullName      String
+  role          UserRole      @default(INSTRUCTOR)
+  passwordHash  String
+  active        Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  sessions      AuthSession[]
+}
+
+// Server-side login sessions. The browser only holds a random token in an
+// httpOnly cookie; we store its SHA-256, so revoking a row (logout, account
+// disabled) ends that session immediately.
+model AuthSession {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  ipAddress  String?
+  userAgent  String?
+
+  @@index([userId])
+}
+
 model Course {
   id        String    @id @default(cuid())
   code      String    @unique
@@ -127,6 +164,12 @@ model Blueprint {
   sourceMode        String // "past_only" | "study_material_only" | "both"
   pastQuestionRatio Float    @default(1.0) // only meaningful for "both"
   distribution      Json? // target counts by topic/difficulty, e.g. {"OSI Model":{"medium":5,"hard":2}}
+  // Past-paper sessions ("years") the instructor chose to draw bank questions from.
+  pastSessionIds    String[] @default([])
+  // Instructor's difficulty split, e.g. {"easy":18,"medium":30,"hard":12}; sums to targetCount.
+  difficultyTargets Json?
+  // "instant": candidates see results on submission; "hold": results go to the instructor first.
+  resultsRelease    String   @default("hold")
   createdAt         DateTime @default(now())
 }
 

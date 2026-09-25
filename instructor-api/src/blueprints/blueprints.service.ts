@@ -32,6 +32,20 @@ export class BlueprintsService {
       throw new BadRequestException('at least one topic is required to draft from study material');
     }
 
+    if (dto.difficultyTargets) {
+      const { easy, medium, hard } = dto.difficultyTargets;
+      if (easy + medium + hard !== dto.totalCount) {
+        throw new BadRequestException('easy + moderate + hard must equal totalCount');
+      }
+    }
+    if (dto.pastSessionIds?.length) {
+      const own = await this.prisma.session.findUniqueOrThrow({ where: { id: dto.sessionId } });
+      const found = await this.prisma.session.count({ where: { id: { in: dto.pastSessionIds }, courseId: own.courseId } });
+      if (found !== new Set(dto.pastSessionIds).size) {
+        throw new BadRequestException('pastSessionIds must be sessions of the same course');
+      }
+    }
+
     const distribution = allocateEvenly(dto.totalCount, dto.topics);
 
     return this.prisma.blueprint.create({
@@ -43,6 +57,9 @@ export class BlueprintsService {
         objectiveCount: dto.objectiveCount,
         theoryCount: dto.theoryCount,
         distribution,
+        pastSessionIds: dto.pastSessionIds ?? [],
+        difficultyTargets: dto.difficultyTargets ? { ...dto.difficultyTargets } : undefined,
+        resultsRelease: dto.resultsRelease ?? 'hold',
       },
     });
   }
@@ -113,6 +130,7 @@ export class BlueprintsService {
           needed,
           sourceMode: blueprint.sourceMode as 'past_only' | 'study_material_only' | 'both',
           pastQuestionRatio: blueprint.pastQuestionRatio,
+          pastSessionIds: blueprint.pastSessionIds,
           existingBodies,
         });
 
@@ -136,6 +154,7 @@ export class BlueprintsService {
     needed: number;
     sourceMode: 'past_only' | 'study_material_only' | 'both';
     pastQuestionRatio: number;
+    pastSessionIds: string[];
     existingBodies: string[];
   }): Promise<{ created: number; found: number; skippedDuplicates: number }> {
     let found = 0;
@@ -160,6 +179,67 @@ export class BlueprintsService {
         take: pastNeeded,
       });
       found += pastAvailable.length;
+
+      // Still short: copy vetted past-paper questions from the years the
+      // instructor picked into this session as fresh drafts, so they go
+      // through review and approval like everything else. A theory
+      // question's marking scheme comes with it, marked "reused from bank".
+      const otherSessions = params.pastSessionIds.filter((id) => id !== params.sessionId);
+      if (found < pastNeeded && otherSessions.length) {
+        const candidates = await this.prisma.questionBankItem.findMany({
+          where: {
+            sessionId: { in: otherSessions },
+            topic: params.topic,
+            type: params.type,
+            source: 'PAST_PAPER',
+            status: 'APPROVED',
+          },
+          include: { markingScheme: { include: { conceptGroups: true } } },
+          orderBy: { createdAt: 'desc' },
+        });
+        for (const item of candidates) {
+          if (found >= pastNeeded) break;
+          if (isNearDuplicate(item.body, params.existingBodies)) {
+            skippedDuplicates++;
+            continue;
+          }
+          await this.prisma.questionBankItem.create({
+            data: {
+              sessionId: params.sessionId,
+              topic: item.topic,
+              difficulty: item.difficulty,
+              type: item.type,
+              source: 'PAST_PAPER',
+              status: 'DRAFT',
+              body: item.body,
+              options: item.options ?? undefined,
+              correctIndex: item.correctIndex ?? undefined,
+              markingScheme: item.markingScheme
+                ? {
+                    create: {
+                      totalMarks: item.markingScheme.totalMarks,
+                      ceilingPercent: item.markingScheme.ceilingPercent,
+                      minWordCount: item.markingScheme.minWordCount,
+                      reusedFromBank: true,
+                      conceptGroups: {
+                        create: item.markingScheme.conceptGroups.map((g) => ({
+                          canonicalTerm: g.canonicalTerm,
+                          synonyms: g.synonyms,
+                          marks: g.marks,
+                          required: g.required,
+                          order: g.order,
+                        })),
+                      },
+                    },
+                  }
+                : undefined,
+            },
+          });
+          params.existingBodies.push(item.body);
+          created++;
+          found++;
+        }
+      }
     }
 
     // "Study material only" / the AI half of "both": whatever's still

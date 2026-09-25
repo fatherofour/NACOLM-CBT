@@ -1,7 +1,9 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+
+const slug = (s: string) => s.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AiGenerationService } from '../ai-generation/ai-generation.service.js';
 import type { DocumentType } from '../generated/prisma/enums.js';
@@ -17,8 +19,19 @@ export class DocumentsService {
     private readonly aiGeneration: AiGenerationService,
   ) {}
 
+  /**
+   * Where a file for this session and type is saved on the server:
+   * <DOCUMENT_STORAGE_ROOT>/<COURSE>/<session-label>/<past-papers|study-material>/
+   * The portal shows this path to the instructor before they upload.
+   */
+  async destination(sessionId: string, docType: DocumentType) {
+    const session = await this.prisma.session.findUniqueOrThrow({ where: { id: sessionId }, include: { course: true } });
+    const folder = docType === 'PAST_PAPER' ? 'past-papers' : 'study-material';
+    return resolve(STORAGE_ROOT, slug(session.course.code), slug(session.label), folder);
+  }
+
   async upload(sessionId: string, docType: DocumentType, title: string, file: Express.Multer.File) {
-    const dir = join(STORAGE_ROOT, sessionId, docType);
+    const dir = await this.destination(sessionId, docType);
     await mkdir(dir, { recursive: true });
     const safeName = `${randomUUID()}_${basename(file.originalname)}`;
     const storagePath = join(dir, safeName);
@@ -57,9 +70,14 @@ export class DocumentsService {
     return document;
   }
 
-  list(sessionId: string, docType?: DocumentType) {
+  list(filter: { sessionId?: string; courseId?: string; docType?: DocumentType }) {
     return this.prisma.sourceDocument.findMany({
-      where: { sessionId, ...(docType ? { docType } : {}) },
+      where: {
+        ...(filter.sessionId ? { sessionId: filter.sessionId } : {}),
+        ...(filter.courseId ? { session: { courseId: filter.courseId } } : {}),
+        ...(filter.docType ? { docType: filter.docType } : {}),
+      },
+      include: { session: { include: { course: true } } },
       orderBy: { uploadedAt: 'desc' },
     });
   }

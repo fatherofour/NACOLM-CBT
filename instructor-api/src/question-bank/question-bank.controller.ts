@@ -4,6 +4,7 @@ import { CreateBankItemDto } from './dto/create-bank-item.dto.js';
 import { EditQuestionDto } from './dto/edit-question.dto.js';
 import { RejectQuestionDto } from './dto/reject-question.dto.js';
 import type { QuestionStatus, QuestionType } from '../generated/prisma/enums.js';
+import { CurrentUser, actorName, type SessionUser } from '../auth/decorators.js';
 
 @Controller('question-bank')
 export class QuestionBankController {
@@ -30,18 +31,18 @@ export class QuestionBankController {
   }
 
   @Patch(':id')
-  edit(@Param('id') id: string, @Body() dto: EditQuestionDto) {
-    return this.bank.edit(id, dto);
+  edit(@Param('id') id: string, @Body() dto: EditQuestionDto, @CurrentUser() user: SessionUser) {
+    return this.bank.edit(id, dto, actorName(user));
   }
 
   @Post(':id/approve')
-  approve(@Param('id') id: string) {
-    return this.bank.approve(id);
+  approve(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    return this.bank.approve(id, actorName(user));
   }
 
   @Post(':id/reject')
-  reject(@Param('id') id: string, @Body() dto: RejectQuestionDto) {
-    return this.bank.reject(id, dto.reason);
+  reject(@Param('id') id: string, @Body() dto: RejectQuestionDto, @CurrentUser() user: SessionUser) {
+    return this.bank.reject(id, dto.reason, actorName(user));
   }
 
   @Get(':id/audit-log')

@@ -22,7 +22,8 @@ draw.io VS Code extension.
 | Service | Language | Role |
 |---|---|---|
 | [`central-api`](central-api/) | Python (FastAPI) | Online: document library, RAG question drafting, exam package builder — also the AI/RAG engine `instructor-api` calls into |
-| [`instructor-api`](instructor-api/) | TypeScript (NestJS + Prisma) | Online: the instructor question-setting workflow — wizard, draft review/approval, theory marking schemes, blueprint coverage, paper freeze |
+| [`instructor-api`](instructor-api/) | TypeScript (NestJS + Prisma) | Online: the instructor question-setting workflow — auth, wizard, draft review/approval, theory marking schemes, blueprint coverage, paper freeze |
+| [`instructor-web`](instructor-web/) | TypeScript (Next.js) | Online: the instructor portal UI — sign-in, wizard, review, marking schemes, freeze, question bank, study material, results |
 | [`local-exam-server`](local-exam-server/) | Go | Offline: runs per venue, serves candidates over LAN, no internet needed on exam day |
 
 The split follows where each language's ecosystem actually helps: Python for
@@ -31,8 +32,11 @@ workflow's richer relational data model, Go because the exam-day delivery
 point needs to ship as one dependency-free static binary onto venue hardware
 you don't get to babysit.
 
-There is no frontend in this repo yet — an earlier instructor UI prototype
-(Vite/React, then Next.js) was removed; a fresh build is a follow-up.
+`instructor-web` talks only to `instructor-api` (through its `/api` rewrite),
+so the session cookie stays first-party and no CORS is needed. Sign-in uses
+server-side sessions in `instructor-api` (instant revocation, roles for
+Instructor vs. Exam Officer); accounts are created with
+`instructor-api/scripts/create-user.mjs`, not self-registration.
 
 ## The past-question / study-material mix
 
@@ -57,6 +61,20 @@ cd central-api
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements-dev.txt
 pytest -v
+
+# Instructor API (needs Postgres — see docker-compose.yml)
+cd instructor-api
+npm install
+npx prisma migrate dev
+npm test
+npm run build
+node scripts/create-user.mjs --service NA/00001 --rank Capt --name "Your Name" --role EXAM_OFFICER
+node scripts/seed-demo.mjs   # optional: sample course/session/questions
+
+# Instructor web
+cd instructor-web
+npm install
+npm run build
 
 # Local exam server
 cd local-exam-server

@@ -1,4 +1,4 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsOptional, IsString, MinLength } from 'class-validator';
 
 export class FreezePaperDto {
   @IsString()
@@ -14,7 +14,8 @@ export class FreezePaperDto {
   @IsString()
   confirmationPhrase!: string;
 
+  // Ignored if sent: the controller sets it from the signed-in user.
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   frozenBy!: string;
 }

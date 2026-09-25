@@ -5,8 +5,6 @@ import { CreateBankItemDto } from './dto/create-bank-item.dto.js';
 import { EditQuestionDto } from './dto/edit-question.dto.js';
 import type { QuestionStatus, QuestionType } from '../generated/prisma/enums.js';
 
-const ACTOR = 'instructor-demo'; // placeholder until real session auth lands
-
 @Injectable()
 export class QuestionBankService {
   constructor(
@@ -34,17 +32,17 @@ export class QuestionBankService {
     return this.prisma.questionBankItem.create({ data: dto });
   }
 
-  async approve(id: string) {
+  async approve(id: string, actor: string) {
     const before = await this.getOrThrow(id);
     const after = await this.prisma.questionBankItem.update({
       where: { id },
       data: { status: 'APPROVED', rejectReason: null },
     });
-    await this.audit.log({ questionId: id, action: 'approve', actor: ACTOR, beforeState: before, afterState: after });
+    await this.audit.log({ questionId: id, action: 'approve', actor, beforeState: before, afterState: after });
     return after;
   }
 
-  async reject(id: string, reason: string) {
+  async reject(id: string, reason: string, actor: string) {
     const before = await this.getOrThrow(id);
     const after = await this.prisma.questionBankItem.update({
       where: { id },
@@ -53,7 +51,7 @@ export class QuestionBankService {
     await this.audit.log({
       questionId: id,
       action: 'reject',
-      actor: ACTOR,
+      actor,
       reason,
       beforeState: before,
       afterState: after,
@@ -61,7 +59,7 @@ export class QuestionBankService {
     return after;
   }
 
-  async edit(id: string, dto: EditQuestionDto) {
+  async edit(id: string, dto: EditQuestionDto, actor: string) {
     const before = await this.getOrThrow(id);
     if (before.type === 'OBJECTIVE' && dto.options && dto.correctIndex !== undefined) {
       if (dto.correctIndex < 0 || dto.correctIndex >= dto.options.length) {
@@ -72,7 +70,7 @@ export class QuestionBankService {
       where: { id },
       data: { ...dto, version: { increment: 1 } },
     });
-    await this.audit.log({ questionId: id, action: 'edit', actor: ACTOR, beforeState: before, afterState: after });
+    await this.audit.log({ questionId: id, action: 'edit', actor, beforeState: before, afterState: after });
     return after;
   }
 

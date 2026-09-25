@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { MarkingSchemesService } from './marking-schemes.service.js';
 import { SaveMarkingSchemeDto } from './dto/save-marking-scheme.dto.js';
 import { TestSchemeDto } from './dto/test-scheme.dto.js';
+import { CurrentUser, actorName, type SessionUser } from '../auth/decorators.js';
 
 @Controller('question-bank/:questionId/marking-scheme')
 export class MarkingSchemesController {
@@ -18,9 +19,8 @@ export class MarkingSchemesController {
   }
 
   @Put()
-  save(@Param('questionId') questionId: string, @Body() dto: SaveMarkingSchemeDto) {
-    // actor is a placeholder until real session auth lands
-    return this.schemes.save(questionId, dto, 'instructor-demo');
+  save(@Param('questionId') questionId: string, @Body() dto: SaveMarkingSchemeDto, @CurrentUser() user: SessionUser) {
+    return this.schemes.save(questionId, dto, actorName(user));
   }
 
   @Post('test')

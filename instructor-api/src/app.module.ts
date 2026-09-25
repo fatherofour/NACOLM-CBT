@@ -9,10 +9,12 @@ import { MarkingSchemesModule } from './marking-schemes/marking-schemes.module.j
 import { BlueprintsModule } from './blueprints/blueprints.module.js';
 import { PapersModule } from './papers/papers.module.js';
 import { AuditModule } from './audit/audit.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 @Module({
   imports: [
     PrismaModule,
+    AuthModule,
     AuditModule,
     CoursesModule,
     DocumentsModule,
