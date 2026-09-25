@@ -2,12 +2,16 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import { Suspense } from 'react';
 import { LoginForm } from './login-form';
+import { ThemeToggle } from '@/components/shell/theme-toggle';
 
 export const metadata: Metadata = { title: 'Sign in' };
 
 export default function LoginPage() {
   return (
-    <div className="flex min-h-dvh flex-col bg-surface lg:flex-row">
+    <div className="relative flex min-h-dvh flex-col bg-surface lg:flex-row">
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-line-strong bg-surface-raised text-ink" />
+      </div>
       <section
         aria-label="Nigerian Army College of Logistics and Management"
         className="relative flex shrink-0 flex-col items-center justify-center gap-4 border-b-[3px] border-army-red bg-command px-6 py-8 text-center text-on-command lg:w-[46%] lg:border-b-0 lg:border-r-4 lg:px-12 lg:py-16"

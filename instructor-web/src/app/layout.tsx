@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
+import { ThemeScript } from '@/components/shell/theme-script';
 
 // Archivo (SIL Open Font License), self-hosted so the portal needs no call
 // to Google Fonts: variable weight 100–900 and width 62–125.
@@ -22,7 +23,10 @@ export const viewport: Viewport = { themeColor: '#0f3b22', width: 'device-width'
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={archivo.variable}>
+    <html lang="en" className={archivo.variable} suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
       <body>{children}</body>
     </html>
   );
