@@ -34,6 +34,7 @@ enum DocumentType {
 enum UserRole {
   INSTRUCTOR
   EXAM_OFFICER
+  ADMIN
 }
 
 // Portal users. Passwords are scrypt hashes (see src/auth/password.ts);

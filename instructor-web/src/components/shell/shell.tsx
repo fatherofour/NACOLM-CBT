@@ -13,6 +13,7 @@ const NAV: { href: string; label: string; short: string; icon: GlyphName }[] = [
   { href: '/material', label: 'Study material', short: 'Material', icon: 'material' },
   { href: '/results', label: 'Results', short: 'Results', icon: 'results' },
 ];
+const ADMIN_NAV = { href: '/admin/users', label: 'Users', short: 'Users', icon: 'users' as GlyphName };
 
 const initials = (u: User) =>
   u.fullName
@@ -28,7 +29,8 @@ export function Shell({ user, children }: { user: User; children: React.ReactNod
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
   const active = (href: string) => path === href || path.startsWith(href + '/');
-  const roleLabel = user.role === 'EXAM_OFFICER' ? 'Exam officer' : 'Instructor';
+  const roleLabel = user.role === 'ADMIN' ? 'Admin' : user.role === 'EXAM_OFFICER' ? 'Exam officer' : 'Instructor';
+  const nav = user.role === 'ADMIN' ? [...NAV, ADMIN_NAV] : NAV;
 
   async function signOut() {
     setSigningOut(true);
@@ -72,7 +74,7 @@ export function Shell({ user, children }: { user: User; children: React.ReactNod
 
         <div className="flex min-h-0 flex-1">
           <nav aria-label="Main" className="hidden w-[232px] shrink-0 flex-col gap-1 border-r border-line bg-surface-raised px-3 py-5 lg:flex">
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <Link
                 key={n.href}
                 href={n.href}
@@ -94,7 +96,7 @@ export function Shell({ user, children }: { user: User; children: React.ReactNod
         </div>
 
         <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 flex h-16 border-t border-line bg-surface-raised lg:hidden">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <Link
               key={n.href}
               href={n.href}

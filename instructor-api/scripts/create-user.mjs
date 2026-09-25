@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// Create or update a portal user.
+// Create or update a portal user. This is the only way to create the first
+// ADMIN account (the Users screen in the portal needs one to sign in as
+// before it can create any more) — every account after that can be managed
+// from Admin > Users instead.
 //
 //   node scripts/create-user.mjs --service NA/12345 --rank Capt --name "O. Nwosu" \
 //     --role INSTRUCTOR [--password '...']
 //
-// --role is INSTRUCTOR or EXAM_OFFICER. Without --password a strong one is
-// generated and printed once. Reads DATABASE_URL from the environment or .env.
-// The hash format matches src/auth/password.ts.
+// --role is INSTRUCTOR, EXAM_OFFICER or ADMIN. Without --password a strong
+// one is generated and printed once. Reads DATABASE_URL from the environment
+// or .env. The hash format matches src/auth/password.ts.
 import 'dotenv/config';
 import { randomBytes, scrypt as scryptCb } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -18,8 +21,8 @@ const args = Object.fromEntries(
 );
 const serviceNumber = (args.service ?? '').trim().toUpperCase();
 const role = (args.role ?? 'INSTRUCTOR').toUpperCase();
-if (!serviceNumber || !args.rank || !args.name || !['INSTRUCTOR', 'EXAM_OFFICER'].includes(role)) {
-  console.error('Usage: --service <no> --rank <rank> --name "<name>" --role INSTRUCTOR|EXAM_OFFICER [--password <pw>]');
+if (!serviceNumber || !args.rank || !args.name || !['INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN'].includes(role)) {
+  console.error('Usage: --service <no> --rank <rank> --name "<name>" --role INSTRUCTOR|EXAM_OFFICER|ADMIN [--password <pw>]');
   process.exit(1);
 }
 const password = args.password ?? randomBytes(12).toString('base64url');

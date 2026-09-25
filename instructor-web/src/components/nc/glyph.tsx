@@ -15,6 +15,7 @@ const PATHS: Record<string, string> = {
   signout: 'M9.5 3.5h3v9h-3M6.5 5.5L4 8l2.5 2.5M4 8h6',
   back: 'M10 4L6 8l4 4',
   eye: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM8 10a2 2 0 100-4 2 2 0 000 4z',
+  users: 'M6 8a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM1.5 13.5c0-2.2 2-4 4.5-4s4.5 1.8 4.5 4M11 4.2a2.2 2.2 0 010 4.1M12.5 9.6c1.7.4 2.9 1.8 2.9 3.4',
 };
 
 export type GlyphName = keyof typeof PATHS | 'dot' | 'info';

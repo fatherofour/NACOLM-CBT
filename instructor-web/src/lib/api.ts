@@ -47,8 +47,9 @@ export const qs = (params: Record<string, string | undefined>) => {
 };
 
 // ---- Shapes returned by instructor-api ----
-export type Role = 'INSTRUCTOR' | 'EXAM_OFFICER';
+export type Role = 'INSTRUCTOR' | 'EXAM_OFFICER' | 'ADMIN';
 export interface User { id: string; serviceNumber: string; rank: string; fullName: string; role: Role }
+export interface ManagedUser extends User { active: boolean; createdAt: string }
 export interface Session { id: string; courseId: string; label: string; createdAt: string }
 export interface Course { id: string; code: string; name: string; sessions: Session[] }
 export type QStatus = 'DRAFT' | 'APPROVED' | 'REJECTED';
