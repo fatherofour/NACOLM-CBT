@@ -1,0 +1,59 @@
+:root {
+  --surface: #f3f4ef; --surface-raised: #ffffff; --surface-sunken: #e8eae2;
+  --line: #d3d7ca; --line-strong: #7d8471; --ink: #1a2015; --ink-muted: #525a48;
+  --field: #1b5a33; --field-soft: #dcebdf; --on-field: #ffffff;
+  --army-red: #b3121f; --command: #0f3b22; --on-command: #ffffff; --on-command-muted: #b9cfbf;
+  --approved: #17577f; --approved-soft: #dfecf6;
+  --rejected: #b3121f; --rejected-soft: #f9e5e1; --caution: #7a4900; --caution-soft: #fbeed3;
+  --shadow: 0 8px 24px rgba(26,32,21,0.18);
+}
+* { box-sizing: border-box; }
+html, body, #app { margin: 0; min-height: 100%; }
+body { font-family: "Segoe UI", system-ui, sans-serif; background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1.5; }
+:focus-visible { outline: 3px solid var(--field); outline-offset: 2px; }
+button { font: inherit; }
+.boot { padding: 40px; color: var(--ink-muted); }
+
+.top { height: 64px; background: var(--command); color: var(--on-command); display: flex; align-items: center; gap: 16px; padding: 0 24px; border-bottom: 4px solid var(--army-red); }
+.top b { font-size: 19px; font-weight: 750; letter-spacing: -0.01em; }
+.top .sub { font-size: 13px; color: var(--on-command-muted); }
+.top .grow { flex: 1; }
+
+.page { max-width: 920px; margin: 0 auto; padding: 32px 24px 64px; display: flex; flex-direction: column; gap: 20px; }
+
+.card { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; padding: 24px; box-shadow: var(--shadow); }
+.card h2 { margin: 0 0 4px; font-size: 20px; }
+.card p.muted { margin: 4px 0 16px; color: var(--ink-muted); font-size: 14px; }
+
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 650; }
+.pill.ok { background: var(--approved-soft); color: var(--approved); }
+.pill.bad { background: var(--caution-soft); color: var(--caution); }
+
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 650; margin-bottom: 16px; }
+.field input { font: inherit; font-size: 16px; height: 44px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-raised); color: var(--ink); font-family: monospace; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 5px; font-size: 15px; font-weight: 650; cursor: pointer; border: 1px solid var(--line-strong); background: var(--surface-raised); color: var(--ink); }
+.btn:hover:not(:disabled) { background: var(--surface-sunken); }
+.btn.primary { background: var(--field); border-color: var(--field); color: var(--on-field); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.12); }
+.btn:disabled { cursor: not-allowed; color: var(--ink-muted); }
+
+.alert { padding: 12px 16px; border-radius: 5px; font-size: 14px; margin-bottom: 16px; }
+.alert.error { background: var(--rejected-soft); color: var(--rejected); }
+.alert.ok { background: var(--approved-soft); color: var(--approved); }
+
+.summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.summary .stat { flex: 1; min-width: 110px; background: var(--surface-sunken); border-radius: 6px; padding: 10px 14px; }
+.summary .stat b { display: block; font-size: 22px; }
+.summary .stat span { font-size: 12px; color: var(--ink-muted); }
+
+input.search { width: 100%; font: inherit; font-size: 14px; height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 5px; margin-bottom: 12px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+th { color: var(--ink-muted); font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+td.status .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 650; }
+.badge.not_checked_in { background: var(--surface-sunken); color: var(--ink-muted); }
+.badge.checked_in { background: var(--caution-soft); color: var(--caution); }
+.badge.started { background: #dfecf6; color: var(--approved); }
+.badge.submitted { background: var(--field-soft); color: var(--field); }

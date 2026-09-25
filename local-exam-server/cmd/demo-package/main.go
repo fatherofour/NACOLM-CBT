@@ -94,7 +94,8 @@ Open the kiosk: http://localhost:8080/kiosk/?seat=A-14
 Sign in as NA/24/0412 with PIN 482913 (roster.csv has two more).
 
 Open the paper (what the invigilator does at the start time):
-  curl -X POST localhost:8080/release -d '{"key_hex":"%[3]s"}'
+  Visit http://localhost:8080/invigilator/ and paste this release key:
+  %[3]s
 `, *out, examID, hex.EncodeToString(key))
 }
 

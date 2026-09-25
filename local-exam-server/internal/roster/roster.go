@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -107,3 +108,14 @@ func (r *Roster) Get(serviceNumber string) (Candidate, bool) {
 }
 
 func (r *Roster) Len() int { return len(r.byService) }
+
+// All returns every candidate on the roster, sorted by service number, for
+// the invigilator console's live status list.
+func (r *Roster) All() []Candidate {
+	out := make([]Candidate, 0, len(r.byService))
+	for _, c := range r.byService {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ServiceNumber < out[j].ServiceNumber })
+	return out
+}

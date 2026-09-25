@@ -158,11 +158,19 @@ function PackagePanel({ paperVersionId, isOfficer }: { paperVersionId: string; i
           <div><dt>Checksum</dt><dd className="break-all">{pkg.checksumSha256.slice(0, 16)}…</dd></div>
           {built ? (
             <div className="col-span-2">
-              <dt>Release key (dev-only — hand to the venue&apos;s release process, never log it)</dt>
+              <dt>Release key — shown once, never stored</dt>
               <dd className="break-all font-mono">{built.releaseKeyHex}</dd>
             </div>
           ) : null}
         </dl>
+      ) : null}
+      {built ? (
+        <Alert tone="info" title="How this opens the exam for candidates">
+          Copy this key to the invigilator at the venue (do not send it over the same channel as the
+          package file). At the scheduled start time, they open <code>http://&lt;exam-server&gt;:8080/invigilator/</code> on
+          the venue machine, paste the key and press &quot;Open exam&quot; — candidates can&apos;t check in
+          before that, and that same screen then shows who has checked in, started and submitted.
+        </Alert>
       ) : null}
       {isOfficer ? (
         <div className="nc-row">

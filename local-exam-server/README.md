@@ -33,6 +33,25 @@ That call is the runtime equivalent of the invigilator triggering the
 release key at the scheduled exam start time — the key is never read from
 disk alongside the package.
 
+## Invigilator console
+
+Releasing the paper and watching who's signed in is done at
+`http://<exam-server>:8080/invigilator/` (`internal/api/invigilator/`, same
+embedded-static-files pattern as the kiosk) — there is no separate login,
+since whoever has the release key already has the authority the rest of the
+system assumes they have.
+
+- **Before release:** a form to paste the release key (hex) handed down by
+  the exam officer and press **Open exam**. This calls the same `/release`
+  endpoint the API exposes directly, so scripting the release (e.g. from a
+  timed job) still works.
+- **After release:** a live table of every roster candidate and their
+  progress — not checked in / checked in / started / submitted, with the
+  submission reference — refreshing every 5 seconds, so the invigilator can
+  see who hasn't sat down yet without walking the room.
+- If `CBT_ROSTER_PATH` isn't set, the console says so plainly instead of
+  silently showing an empty room.
+
 ## Candidate kiosk
 
 The server also serves the candidate exam screens at `/kiosk/` — sign-in,
@@ -149,8 +168,9 @@ not to auto-finalize like objective questions do.
 
 Implemented: package decryption (interop-tested against Python), the
 stratified/exposure-controlled/salted randomization engine above, the
-keyword theory-marking engine, SQLite persistence, and a working check-in →
-answer → submit → auto-mark HTTP flow.
+keyword theory-marking engine, SQLite persistence, a working check-in →
+answer → submit → auto-mark HTTP flow, and the invigilator console for
+release + live candidate status.
 
 Deliberately deferred:
 - Sync client that pulls the package pre-exam and pushes results post-exam
@@ -158,7 +178,9 @@ Deliberately deferred:
 - Wiring `internal/marking`'s Scheme end to end: it isn't yet part of the
   package JSON format or the Store, so theory answers aren't auto-scored at
   submit time yet — the engine itself is implemented and tested standalone
-- Invigilator console (release the paper, see who's signed in, reset a PIN)
+- Resetting a candidate's PIN from the invigilator console — the console
+  covers release and live status, but a forgotten/misprinted PIN still means
+  regenerating the roster CSV and restarting with it
 - Theory answers at the centre: the kiosk collects them, but the keyword
   scheme isn't in the package yet, so they aren't auto-scored on submit
 - TLS on the LAN listener (local CA) and auth on the HTTP endpoints

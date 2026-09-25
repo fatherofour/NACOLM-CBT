@@ -43,6 +43,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /paper", s.handlePaper)
 	mux.HandleFunc("POST /submit", s.handleSubmit)
 	s.registerKiosk(mux)
+	s.registerInvigilator(mux)
 	return mux
 }
 
