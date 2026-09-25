@@ -1,0 +1,178 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum QuestionType {
+  OBJECTIVE
+  THEORY
+}
+
+enum QuestionSource {
+  PAST_PAPER
+  AI_DRAFTED
+}
+
+enum QuestionStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+enum DocumentType {
+  PAST_PAPER
+  STUDY_MATERIAL
+}
+
+model Course {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  name      String
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+}
+
+model Session {
+  id         String             @id @default(cuid())
+  course     Course             @relation(fields: [courseId], references: [id])
+  courseId   String
+  label      String // e.g. "2024/2025"
+  documents  SourceDocument[]
+  questions  QuestionBankItem[]
+  blueprints Blueprint[]
+  papers     Paper[]
+  createdAt  DateTime           @default(now())
+
+  @@unique([courseId, label])
+}
+
+model SourceDocument {
+  id          String       @id @default(cuid())
+  session     Session      @relation(fields: [sessionId], references: [id])
+  sessionId   String
+  title       String
+  docType     DocumentType
+  storagePath String
+  // Set once this document has also been registered + ingested with the
+  // central-api RAG service, which is what actually does the AI drafting —
+  // see AiGenerationService. Null until that hand-off succeeds.
+  centralApiDocumentId String?
+  uploadedAt            DateTime @default(now())
+}
+
+model QuestionBankItem {
+  id              String         @id @default(cuid())
+  session         Session        @relation(fields: [sessionId], references: [id])
+  sessionId       String
+  topic           String
+  difficulty      String         @default("medium")
+  type            QuestionType
+  source          QuestionSource
+  status          QuestionStatus @default(DRAFT)
+  body            String
+  options         Json? // OBJECTIVE only: string[]
+  correctIndex    Int? // OBJECTIVE only
+  // AI-drafted provenance, so the instructor can verify grounding without
+  // re-reading the whole source document (spec: "citation chip").
+  citation        String?
+  citationExcerpt String?
+  rejectReason    String?
+  version         Int            @default(1)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  markingScheme MarkingScheme?
+  approvalLogs  ApprovalLog[]
+  paperItems    PaperItem[]
+}
+
+model MarkingScheme {
+  id             String           @id @default(cuid())
+  question       QuestionBankItem @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId     String           @unique
+  totalMarks     Int
+  ceilingPercent Int              @default(50) // score cap if a required group is missing
+  minWordCount   Int              @default(15)
+  reusedFromBank Boolean          @default(false)
+  conceptGroups  ConceptGroup[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model ConceptGroup {
+  id            String        @id @default(cuid())
+  scheme        MarkingScheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  schemeId      String
+  canonicalTerm String
+  synonyms      String[] // additional acceptable terms, on top of canonicalTerm
+  marks         Int
+  required      Boolean       @default(false)
+  order         Int           @default(0)
+}
+
+model Blueprint {
+  id                String   @id @default(cuid())
+  session           Session  @relation(fields: [sessionId], references: [id])
+  sessionId         String
+  targetCount       Int
+  objectiveCount    Int
+  theoryCount       Int
+  sourceMode        String // "past_only" | "study_material_only" | "both"
+  pastQuestionRatio Float    @default(1.0) // only meaningful for "both"
+  distribution      Json? // target counts by topic/difficulty, e.g. {"OSI Model":{"medium":5,"hard":2}}
+  createdAt         DateTime @default(now())
+}
+
+model Paper {
+  id        String         @id @default(cuid())
+  session   Session        @relation(fields: [sessionId], references: [id])
+  sessionId String
+  title     String
+  versions  PaperVersion[]
+  createdAt DateTime       @default(now())
+}
+
+model PaperVersion {
+  id            String      @id @default(cuid())
+  paper         Paper       @relation(fields: [paperId], references: [id])
+  paperId       String
+  versionNumber Int
+  frozenAt      DateTime    @default(now())
+  frozenBy      String // free text until real auth lands — see ApprovalLog note
+  signatureHash String // sha256 of the frozen item set, so tampering after freeze is detectable
+  items         PaperItem[]
+
+  @@unique([paperId, versionNumber])
+}
+
+model PaperItem {
+  id             String           @id @default(cuid())
+  paperVersion   PaperVersion     @relation(fields: [paperVersionId], references: [id])
+  paperVersionId String
+  question       QuestionBankItem @relation(fields: [questionId], references: [id])
+  questionId     String
+  position       Int
+}
+
+// Every mutating action on a question (approve / edit / reject) writes one of
+// these — what makes a paper defensible if challenged later. `actor` is free
+// text for now (e.g. "instructor-demo") since real session auth is a
+// follow-up, not this pass — see instructor-api/README.md.
+model ApprovalLog {
+  id          String           @id @default(cuid())
+  question    QuestionBankItem @relation(fields: [questionId], references: [id])
+  questionId  String
+  action      String // "approve" | "edit" | "reject"
+  actor       String
+  reason      String? // required for "reject"
+  beforeState Json?
+  afterState  Json?
+  createdAt   DateTime         @default(now())
+}

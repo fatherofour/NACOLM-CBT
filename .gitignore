@@ -1,0 +1,23 @@
+# Python (central-api)
+central-api/.venv/
+central-api/__pycache__/
+central-api/**/__pycache__/
+central-api/.pytest_cache/
+central-api/data/
+central-api/*.egg-info/
+.env
+
+# Go (local-exam-server)
+local-exam-server/bin/
+local-exam-server/data/
+local-exam-server/*.db
+
+# Node (future frontends)
+node_modules/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

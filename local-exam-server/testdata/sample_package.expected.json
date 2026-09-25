@@ -1,0 +1,46 @@
+{
+  "exam_id": "fixture-exam-0001",
+  "title": "Sample Networking Fundamentals CAT",
+  "duration_minutes": 45,
+  "pass_mark": 50.0,
+  "questions_per_candidate": 2,
+  "publish_mode": "instructor_controlled",
+  "pool": [
+    {
+      "id": "q-mcq-1",
+      "type": "mcq",
+      "topic": "OSI Model",
+      "source": "past_question",
+      "stem": "Which OSI layer is responsible for routing?",
+      "options": [
+        "Data Link",
+        "Network",
+        "Transport",
+        "Session"
+      ],
+      "correct_index": 1,
+      "model_answer": null,
+      "rubric": null
+    },
+    {
+      "id": "q-theory-1",
+      "type": "theory",
+      "topic": "Subnetting",
+      "source": "ai_generated",
+      "stem": "Explain why subnetting improves network security and manageability.",
+      "options": null,
+      "correct_index": null,
+      "model_answer": "Subnetting isolates broadcast domains and lets access control be applied per segment.",
+      "rubric": [
+        {
+          "criterion": "Mentions broadcast domain isolation",
+          "points": 5
+        },
+        {
+          "criterion": "Mentions per-segment access control",
+          "points": 5
+        }
+      ]
+    }
+  ]
+}

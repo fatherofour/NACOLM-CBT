@@ -1,0 +1,163 @@
+<mxfile host="app.diagrams.net" agent="claude-code" version="24.0.0">
+  <diagram id="cbt-architecture" name="CBT Architecture">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1650" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Nigerian Army College — CBT System: High-Level Architecture (Offline-First Exam Delivery)" style="text;html=1;align=center;verticalAlign=middle;fontSize=18;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1560" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Zone A background -->
+        <mxCell id="zoneA" value="ONLINE ZONE — Central Authoring &amp; Management Platform (Connected, HQ / Data Center)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;fontSize=14;fontStyle=1;spacingLeft=12;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="640" height="940" as="geometry" />
+        </mxCell>
+
+        <!-- Zone B background -->
+        <mxCell id="zoneB" value="OFFLINE ZONE — Exam Venue LAN (Air-Gapped on Exam Day, repeated per test center)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;align=left;fontSize=14;fontStyle=1;spacingLeft=12;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="60" width="640" height="940" as="geometry" />
+        </mxCell>
+
+        <!-- Sync cloud -->
+        <mxCell id="cloud" value="Secure Sync Channel&#10;(Internet/VPN or Encrypted USB)&#10;used PRE-EXAM &amp; POST-EXAM ONLY" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="700" y="140" width="160" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ===== ZONE A NODES ===== -->
+        <mxCell id="docLib" value="Document Library&#10;(Past Questions &amp; Study Materials)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="100" y="160" width="170" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vectorDb" value="Vector Store&#10;(Embeddings for RAG)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="310" y="160" width="170" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="aiEngine" value="AI Question Generation&#10;Service (RAG + LLM)" style="shape=mxgraph.networks.server;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="530" y="165" width="70" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="idMgmt" value="Identity &amp; Role Management&#10;(Admin / Instructor / Student SSO)&#10;[shared with LMS]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="300" width="170" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="draftBank" value="Draft Question Bank&#10;(MCQ + Theory + Model Answers)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="310" y="310" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="reviewPortal" value="Instructor Review &amp;&#10;Approval Portal (Web)" style="shape=mxgraph.networks.pc;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="345" y="450" width="80" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="approvedBank" value="Approved Question Bank&#10;(Versioned, IMS QTI-compatible export)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="310" y="580" width="200" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pkgBuilder" value="Exam Package Builder&#10;(AES-256 Encrypt, Time-Locked Key)" style="shape=mxgraph.networks.server;html=1;whiteSpace=wrap;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="345" y="730" width="70" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="resultsServer" value="Central Results Server&#10;(Aggregation, Transcripts, Analytics)" style="shape=mxgraph.networks.server;html=1;whiteSpace=wrap;fillColor=#ffe6cc;strokeColor=#d79b00;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="130" y="735" width="70" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ===== ZONE B NODES ===== -->
+        <mxCell id="localServer" value="Local Exam Server&#10;(Offline LAN, Auto-Marks Objective Qs,&#10;Holds Decryption Key)" style="shape=mxgraph.networks.server;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;verticalLabelPosition=bottom;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="160" width="80" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="airgap" value="Air-Gap Boundary&#10;(Internet/Wi-Fi disabled&#10;during exam window)" style="shape=mxgraph.networks.firewall;html=1;whiteSpace=wrap;fillColor=#f8cecc;strokeColor=#b85450;verticalLabelPosition=bottom;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1280" y="165" width="60" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lanSwitch" value="LAN Switch&#10;(No WAN Uplink)" style="shape=mxgraph.networks.switch;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;verticalLabelPosition=bottom;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="965" y="310" width="70" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="clientPcs" value="Candidate Workstations&#10;(Locked-Down Kiosk Browser, ×N)" style="shape=mxgraph.networks.pc;html=1;whiteSpace=wrap;fillColor=#d5e8d4;strokeColor=#82b366;verticalLabelPosition=bottom;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="430" width="80" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="invigConsole" value="Invigilator Console&#10;(Session Monitor, Manual Theory Marking,&#10;Publish Toggle)" style="shape=mxgraph.networks.laptop;html=1;whiteSpace=wrap;fillColor=#ffe6cc;strokeColor=#d79b00;verticalLabelPosition=bottom;verticalAlign=top;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1260" y="430" width="80" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="publishDecision" value="Auto-publish&#10;results to student?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="600" width="140" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="heldResults" value="Results Held&#10;(Instructor publishes later&#10;via Central Portal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="600" width="160" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="Standards &amp; Controls:&#10;• IMS QTI-compatible item export (interoperable question bank)&#10;• AES-256 encryption at rest &amp; in transit; TLS on LAN (local CA)&#10;• Pearson VUE-style secure delivery: check-in, timed session, kiosk lockdown, auto-submit&#10;• RBAC + full audit trail (exam creation → approval → delivery → marking → publish)&#10;• Time-locked release key: exam content undecryptable before scheduled start" style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;fillColor=#ffffff;strokeColor=#666666;fontSize=11;spacingLeft=8;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="40" y="880" width="640" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===== EDGES: Zone A internal ===== -->
+        <mxCell id="e1b" value="index / chunk" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="docLib" target="vectorDb">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="retrieve context" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="vectorDb" target="aiEngine">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="generated items" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;rounded=1;" edge="1" parent="1" source="aiEngine" target="draftBank">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="review / edit / approve" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;startArrow=block;startFill=1;" edge="1" parent="1" source="draftBank" target="reviewPortal">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="on approval" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="reviewPortal" target="approvedBank">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="approvedBank" target="pkgBuilder">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== EDGES: cross-zone via cloud ===== -->
+        <mxCell id="e7" value="1. Push encrypted package&#10;(days before exam)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="pkgBuilder" target="cloud">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="2. Pull package,&#10;await release key" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="cloud" target="localServer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="4. Upload results&#10;(post-exam, when online)" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="cloud" target="resultsServer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9b" style="edgeStyle=orthogonalEdgeStyle;html=1;dashed=1;" edge="1" parent="1" source="localServer" target="cloud">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===== EDGES: Zone B internal ===== -->
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="localServer" target="lanSwitch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="lanSwitch" target="clientPcs">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="lanSwitch" target="invigConsole">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="score review / control" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="invigConsole" target="localServer">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="localServer" target="publishDecision">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="Yes: show immediately" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="publishDecision" target="clientPcs">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="900" y="635" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e16" value="No" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" parent="1" source="publishDecision" target="heldResults">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
