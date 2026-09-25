@@ -85,3 +85,54 @@ export interface MarkResult {
 
 export const difficultyLabel = (d: string) => ({ easy: 'Easy', medium: 'Moderate', moderate: 'Moderate', hard: 'Hard' })[d.toLowerCase()] ?? d;
 export const displayName = (u: User) => `${u.rank} ${u.fullName}`;
+
+// ---- Candidates ----------------------------------------------------------
+
+export interface Candidate {
+  id: string;
+  sessionId: string;
+  armyNumber: string;
+  rank: string;
+  fullName: string;
+  active: boolean;
+  createdAt: string;
+}
+export interface NewCandidatePin {
+  armyNumber: string;
+  rank: string;
+  fullName: string;
+  pin: string;
+}
+export interface ExamPackage {
+  id: string;
+  paperVersionId: string;
+  storagePath: string;
+  checksumSha256: string;
+  poolSize: number;
+  builtAt: string;
+  builtBy: string;
+}
+
+// The roster CSV local-exam-server loads at the venue
+// (internal/roster) — one row per candidate whose PIN is known right now.
+// A PIN is only ever visible once (at creation, import or reset), so this
+// can only include rows from that action's own response, not the whole
+// roster after the fact.
+export function rosterCsv(rows: { armyNumber: string; rank: string; fullName: string; pin: string }[]): string {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const lines = [
+    'service_number,rank,full_name,pin',
+    ...rows.map((r) => [r.armyNumber, r.rank, r.fullName, r.pin].map(esc).join(',')),
+  ];
+  return lines.join('\n') + '\n';
+}
+
+export function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}

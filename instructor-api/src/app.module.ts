@@ -11,12 +11,16 @@ import { PapersModule } from './papers/papers.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
+import { CandidatesModule } from './candidates/candidates.module.js';
+import { PackagesModule } from './packages/packages.module.js';
 
 @Module({
   imports: [
     PrismaModule,
     AuthModule,
     UsersModule,
+    CandidatesModule,
+    PackagesModule,
     AuditModule,
     CoursesModule,
     DocumentsModule,

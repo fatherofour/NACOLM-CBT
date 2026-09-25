@@ -10,6 +10,7 @@ import (
 
 	"cbt.army.mil.ng/local-exam-server/internal/api"
 	"cbt.army.mil.ng/local-exam-server/internal/config"
+	"cbt.army.mil.ng/local-exam-server/internal/roster"
 	"cbt.army.mil.ng/local-exam-server/internal/store"
 )
 
@@ -26,6 +27,16 @@ func main() {
 	defer st.Close()
 
 	server := api.NewServer(cfg, st)
+	if cfg.RosterPath != "" {
+		rs, err := roster.Load(cfg.RosterPath)
+		if err != nil {
+			log.Fatalf("roster error: %v", err)
+		}
+		server.SetRoster(rs)
+		log.Printf("candidate kiosk: %d candidates on the roster, served at /kiosk/", rs.Len())
+	} else {
+		log.Printf("candidate kiosk: no CBT_ROSTER_PATH set, so kiosk sign-in is disabled")
+	}
 
 	log.Printf("local exam server listening on %s (exam=%s, package=%s)", cfg.ListenAddr, cfg.ExamID, cfg.PackagePath)
 	log.Printf("waiting for POST /release before any candidate can check in")

@@ -86,6 +86,7 @@ model Session {
   questions  QuestionBankItem[]
   blueprints Blueprint[]
   papers     Paper[]
+  candidates Candidate[]
   createdAt  DateTime           @default(now())
 
   @@unique([courseId, label])
@@ -175,12 +176,14 @@ model Blueprint {
 }
 
 model Paper {
-  id        String         @id @default(cuid())
-  session   Session        @relation(fields: [sessionId], references: [id])
-  sessionId String
-  title     String
-  versions  PaperVersion[]
-  createdAt DateTime       @default(now())
+  id              String         @id @default(cuid())
+  session         Session        @relation(fields: [sessionId], references: [id])
+  sessionId       String
+  title           String
+  durationMinutes Int            @default(60)
+  passMark        Float          @default(50)
+  versions        PaperVersion[]
+  createdAt       DateTime       @default(now())
 }
 
 model PaperVersion {
@@ -192,6 +195,7 @@ model PaperVersion {
   frozenBy      String // free text until real auth lands — see ApprovalLog note
   signatureHash String // sha256 of the frozen item set, so tampering after freeze is detectable
   items         PaperItem[]
+  examPackage   ExamPackage?
 
   @@unique([paperId, versionNumber])
 }
@@ -203,6 +207,41 @@ model PaperItem {
   question       QuestionBankItem @relation(fields: [questionId], references: [id])
   questionId     String
   position       Int
+}
+
+// The candidate roster for a session — who's registered to sit its exams.
+// Bundled into the encrypted package at "Package for exam centre" time so
+// the offline local-exam-server can verify check-in (Army Number + PIN)
+// without ever contacting this service. pinHash uses the same scrypt format
+// as User.passwordHash (see src/auth/password.ts) — the PIN itself is never
+// stored and is only ever returned once, at creation or reset.
+model Candidate {
+  id          String   @id @default(cuid())
+  session     Session  @relation(fields: [sessionId], references: [id])
+  sessionId   String
+  armyNumber  String
+  rank        String
+  fullName    String
+  pinHash     String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([sessionId, armyNumber])
+}
+
+// One row per successful "Package for exam centre" call. The release key
+// itself is deliberately not stored here — see central-api's crypto.py for
+// why — it's returned once in the API response, same as build-package does
+// on the central-api side directly.
+model ExamPackage {
+  id             String       @id @default(cuid())
+  paperVersion   PaperVersion @relation(fields: [paperVersionId], references: [id])
+  paperVersionId String       @unique
+  storagePath    String
+  checksumSha256 String
+  poolSize       Int
+  builtAt        DateTime     @default(now())
+  builtBy        String
 }
 
 // Every mutating action on a question (approve / edit / reject) writes one of

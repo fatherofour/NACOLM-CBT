@@ -53,6 +53,33 @@ venue** (`local-exam-server/internal/randomize`) — different question
 subset, different order, different MCQ option order per candidate, with no
 need to contact the central service on exam day.
 
+## Candidates and exam day
+
+Registering who's allowed to sit an exam is separate from the question
+content, and travels to the venue a different way:
+
+1. **Register candidates** in the portal (`/sessions/:id/candidates` in
+   `instructor-web`) — one at a time or bulk-imported. A PIN is generated
+   per candidate and shown exactly once, the same as a staff password; a
+   lost admission slip means resetting the PIN and reprinting, not looking
+   the old one up.
+2. **Download the roster CSV** from that same screen right after
+   registering — `service_number,rank,full_name,pin` — and hand it to
+   whoever preps the venue machine.
+3. **Package the question content** from the Freeze screen
+   (`instructor-api` → `central-api`'s `/package-bridge/build`) — this
+   produces the encrypted `.cbtpkg` and a release key. The roster does
+   **not** travel inside this file.
+4. At the venue, `local-exam-server` loads the package (`CBT_PACKAGE_PATH`)
+   and the roster CSV (`CBT_ROSTER_PATH`) independently. Candidates sign
+   into the embedded kiosk UI at `/kiosk/` with their service number + PIN,
+   checked against the CSV with SHA-256 (constant-time compare) — no
+   network round-trip, no dependency on `instructor-api` being reachable.
+
+`local-exam-server/cmd/demo-package` writes a sample package, key and
+roster in one shot if you want to try the kiosk without running the whole
+authoring chain first.
+
 ## Getting started
 
 ```bash

@@ -5,6 +5,7 @@ package api
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -26,10 +27,12 @@ type Server struct {
 	mu   sync.RWMutex
 	pkg  *models.ExamPackage // nil until /release succeeds
 	salt []byte              // per-sitting salt, set alongside pkg — see Store.GetOrCreateSalt
+
+	kiosk *kioskState // candidate kiosk sign-in; see kiosk.go
 }
 
 func NewServer(cfg config.Config, st *store.Store) *Server {
-	return &Server{cfg: cfg, store: st}
+	return &Server{cfg: cfg, store: st, kiosk: newKioskState()}
 }
 
 func (s *Server) Router() http.Handler {
@@ -39,6 +42,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("POST /checkin", s.handleCheckIn)
 	mux.HandleFunc("GET /paper", s.handlePaper)
 	mux.HandleFunc("POST /submit", s.handleSubmit)
+	s.registerKiosk(mux)
 	return mux
 }
 
@@ -114,45 +118,46 @@ func (s *Server) handleCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Idempotent: a kiosk restart re-checking in an already-registered
-	// candidate must get back their existing paper, not a freshly (and
-	// differently) generated one, and must not double-count exposure below.
-	existing, err := s.store.LoadCandidatePaper(pkg.ExamID, req.CandidateID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check existing paper: "+err.Error())
+	if status, err := s.ensurePaper(pkg, salt, req.CandidateID); err != nil {
+		writeError(w, status, err.Error())
 		return
 	}
+
+	s.respondWithPaper(w, pkg.ExamID, req.CandidateID)
+}
+
+// ensurePaper draws and stores the candidate's paper on first check-in.
+// Idempotent: a kiosk restart re-checking in an already-registered
+// candidate gets back their existing paper, not a freshly (and differently)
+// generated one, and exposure isn't double-counted.
+func (s *Server) ensurePaper(pkg *models.ExamPackage, salt []byte, candidateID string) (int, error) {
+	existing, err := s.store.LoadCandidatePaper(pkg.ExamID, candidateID)
+	if err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to check existing paper: %w", err)
+	}
 	if len(existing) > 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"questions": existing})
-		return
+		return 0, nil
 	}
 
 	exposureCounts, err := s.store.GetExposureCounts(pkg.ExamID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load exposure counts: "+err.Error())
-		return
+		return http.StatusInternalServerError, fmt.Errorf("failed to load exposure counts: %w", err)
 	}
-
-	questions, err := exam.GenerateCandidateInstance(pkg, req.CandidateID, salt, exposureCounts)
+	questions, err := exam.GenerateCandidateInstance(pkg, candidateID, salt, exposureCounts)
 	if err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
-		return
+		return http.StatusUnprocessableEntity, err
 	}
-	if err := s.store.CheckIn(pkg.ExamID, req.CandidateID, questions); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record check-in: "+err.Error())
-		return
+	if err := s.store.CheckIn(pkg.ExamID, candidateID, questions); err != nil {
+		return http.StatusInternalServerError, fmt.Errorf("failed to record check-in: %w", err)
 	}
-
 	drawnIDs := make([]string, len(questions))
 	for i, q := range questions {
 		drawnIDs[i] = q.QuestionItemID
 	}
 	if err := s.store.IncrementExposure(pkg.ExamID, drawnIDs); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update exposure counts: "+err.Error())
-		return
+		return http.StatusInternalServerError, fmt.Errorf("failed to update exposure counts: %w", err)
 	}
-
-	s.respondWithPaper(w, pkg.ExamID, req.CandidateID)
+	return 0, nil
 }
 
 func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {

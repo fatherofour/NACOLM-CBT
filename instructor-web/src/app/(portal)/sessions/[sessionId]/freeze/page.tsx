@@ -1,12 +1,12 @@
 'use client';
 import Link from 'next/link';
 import { use, useState } from 'react';
-import { Alert, Spinner, WizardSteps } from '@/components/nc/basics';
+import { Alert, Button, Spinner, WizardSteps } from '@/components/nc/basics';
 import { CoverageTable } from '@/components/nc/coverage';
 import { FreezeConfirm, FreezeReceipt } from '@/components/nc/freeze';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { useUser } from '@/components/shell/user-context';
-import { api, qs, type Blueprint, type CoverageRow, type Paper, type Question } from '@/lib/api';
+import { api, qs, type Blueprint, type CoverageRow, type ExamPackage, type Paper, type Question } from '@/lib/api';
 import { sessionInfo } from '@/lib/session-info';
 import { useData } from '@/lib/use-data';
 
@@ -66,7 +66,14 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
         title="Coverage and freeze"
         intro="Check the paper against its blueprint, then freeze a signed version for the exam centre."
         crumbs={[['Exam sessions', '/sessions'], [info.data?.title ?? '…', `/sessions/${sessionId}/review`], ['Freeze']]}
-        action={<div className="w-full md:w-[520px]"><WizardSteps steps={['Generate', 'Review', 'Coverage', 'Freeze']} current={3} /></div>}
+        action={
+          <div className="flex flex-col items-end gap-3 md:w-[520px]">
+            <WizardSteps steps={['Generate', 'Review', 'Coverage', 'Freeze']} current={3} />
+            <Link className="btnlink" href={`/sessions/${sessionId}/candidates`}>
+              Manage candidates
+            </Link>
+          </div>
+        }
       />
       {info.error || data.error ? <Alert tone="error" title="Couldn’t load this paper">{info.error || data.error}</Alert> : null}
       {!d && !data.error ? <Spinner label="Loading…" /> : null}
@@ -90,6 +97,7 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
 
           <div className="flex shrink-0 flex-col gap-4 xl:w-[540px]">
             {latest ? <FreezeReceipt version={latest.versionNumber} frozenBy={latest.frozenBy} frozenAt={fmt(latest.frozenAt)} signature={latest.signatureHash} /> : null}
+            {latest ? <PackagePanel paperVersionId={latest.id} isOfficer={isOfficer} /> : null}
             {error ? <Alert tone="error" title="Couldn’t freeze">{error}</Alert> : null}
             {isOfficer && latest && !again ? (
               <div className="flex flex-col items-start gap-2">
@@ -115,5 +123,56 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
         </div>
       ) : null}
     </>
+  );
+}
+
+function PackagePanel({ paperVersionId, isOfficer }: { paperVersionId: string; isOfficer: boolean }) {
+  const existing = useData(() => api.get<ExamPackage | null>(`/packages/${paperVersionId}`).catch(() => null), [paperVersionId]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [built, setBuilt] = useState<{ checksumSha256: string; releaseKeyHex: string; poolSize: number } | null>(null);
+
+  async function build() {
+    setBusy(true);
+    setError('');
+    try {
+      setBuilt(await api.post(`/packages/${paperVersionId}/build`, {}));
+      await existing.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Packaging failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pkg = built ?? existing.data;
+
+  return (
+    <div className="nc-freeze">
+      <p className="t-title">Package for exam centre</p>
+      <p>Encrypts this version&apos;s questions for the venue. The candidate roster travels separately as a CSV — see Manage candidates.</p>
+      {error ? <Alert tone="error" title="Couldn’t package">{error}</Alert> : null}
+      {pkg ? (
+        <dl className="nc-freeze-sum">
+          <div><dt>Questions</dt><dd>{pkg.poolSize}</dd></div>
+          <div><dt>Checksum</dt><dd className="break-all">{pkg.checksumSha256.slice(0, 16)}…</dd></div>
+          {built ? (
+            <div className="col-span-2">
+              <dt>Release key (dev-only — hand to the venue&apos;s release process, never log it)</dt>
+              <dd className="break-all font-mono">{built.releaseKeyHex}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      {isOfficer ? (
+        <div className="nc-row">
+          <Button variant="primary" disabled={busy} onClick={build}>
+            {busy ? 'Packaging…' : pkg ? 'Rebuild package' : 'Build package'}
+          </Button>
+        </div>
+      ) : (
+        <Alert tone="info" title="The exam officer packages the paper">Ask them to build it once this version is ready.</Alert>
+      )}
+    </div>
   );
 }

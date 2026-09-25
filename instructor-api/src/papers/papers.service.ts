@@ -30,9 +30,22 @@ export class PapersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const paper =
-        (await tx.paper.findFirst({ where: { sessionId: dto.sessionId, title: dto.title } })) ??
-        (await tx.paper.create({ data: { sessionId: dto.sessionId, title: dto.title } }));
+      const existingPaper = await tx.paper.findFirst({ where: { sessionId: dto.sessionId, title: dto.title } });
+      const paper = existingPaper
+        ? dto.durationMinutes || dto.passMark
+          ? await tx.paper.update({
+              where: { id: existingPaper.id },
+              data: { durationMinutes: dto.durationMinutes, passMark: dto.passMark },
+            })
+          : existingPaper
+        : await tx.paper.create({
+            data: {
+              sessionId: dto.sessionId,
+              title: dto.title,
+              durationMinutes: dto.durationMinutes ?? 60,
+              passMark: dto.passMark ?? 50,
+            },
+          });
 
       const lastVersion = await tx.paperVersion.findFirst({
         where: { paperId: paper.id },

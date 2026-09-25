@@ -77,7 +77,6 @@ export function FreezeReceipt({ version, frozenBy, frozenAt, signature }: { vers
           <dd className="break-all">{signature.slice(0, 16)}…</dd>
         </div>
       </dl>
-      <p className="t-small nc-muted m-0">Packaging for exam centres runs in the central service and isn’t connected to this portal yet.</p>
     </div>
   );
 }

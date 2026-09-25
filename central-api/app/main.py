@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.routes import documents, drafts, exams, questions
+from app.api.routes import documents, drafts, exams, package_bridge, questions
 from app.db.base import Base
 from app.db.session import engine
 
@@ -36,6 +36,7 @@ app.include_router(documents.router)
 app.include_router(drafts.router)
 app.include_router(questions.router)
 app.include_router(exams.router)
+app.include_router(package_bridge.router)
 
 
 @app.get("/health")

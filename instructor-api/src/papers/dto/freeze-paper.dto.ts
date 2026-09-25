@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsInt, IsOptional, IsPositive, IsString, Min, MinLength } from 'class-validator';
 
 export class FreezePaperDto {
   @IsString()
@@ -18,4 +18,16 @@ export class FreezePaperDto {
   @IsOptional()
   @IsString()
   frozenBy!: string;
+
+  // Only meaningful the first time this paper is created — see
+  // PapersService.freeze. Needed by the venue package (timing, pass/fail),
+  // not asked for anywhere earlier in the wizard.
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  durationMinutes?: number;
+
+  @IsOptional()
+  @Min(0)
+  passMark?: number;
 }
