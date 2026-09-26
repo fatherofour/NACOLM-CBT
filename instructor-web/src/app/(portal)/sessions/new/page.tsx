@@ -2,9 +2,10 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { Alert, Button, RadioCards, Spinner, SumCheck, TagInput, WizardSteps } from '@/components/nc/basics';
+import { Alert, Button, EmptyState, RadioCards, Spinner, SumCheck, TagInput, WizardSteps } from '@/components/nc/basics';
 import { Glyph } from '@/components/nc/glyph';
 import { PageHead, Panel } from '@/components/shell/page-head';
+import { useUser } from '@/components/shell/user-context';
 import { api, qs, type Blueprint, type Course, type Question, type Session, type SourceDocument } from '@/lib/api';
 import { useData } from '@/lib/use-data';
 
@@ -25,11 +26,11 @@ export default function NewSessionPage() {
 
 function Wizard() {
   const params = useSearchParams();
+  const me = useUser();
   const { data: courses, error: loadError, reload } = useData(() => api.get<Course[]>('/courses'), []);
 
   const [step, setStep] = useState(0);
   const [pickedCourse, setCourseId] = useState('');
-  const [newCourse, setNewCourse] = useState({ code: '', name: '' });
   const [pickedSession, setSessionId] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [source, setSource] = useState<Source>('past_only');
@@ -49,12 +50,12 @@ function Wizard() {
   const wanted = params.get('session');
   const hit = courses?.find((c) => c.sessions.some((s) => s.id === wanted));
   const defaultCourse = hit ?? [...(courses ?? [])].sort((a, b) => b.sessions.length - a.sessions.length)[0];
-  const courseId = pickedCourse || (courses ? defaultCourse?.id ?? NEW : '');
+  const courseId = pickedCourse || (courses ? defaultCourse?.id ?? '' : '');
   const newestOf = (c?: Course) => [...(c?.sessions ?? [])].sort((a, b) => b.label.localeCompare(a.label))[0]?.id ?? NEW;
   const sessionId = pickedSession || (courses ? (hit && courseId === hit.id ? wanted! : newestOf(courses.find((c) => c.id === courseId))) : '');
 
   const course = courses?.find((c) => c.id === courseId);
-  const isNewTerm = sessionId === NEW || courseId === NEW;
+  const isNewTerm = sessionId === NEW;
   const usesBank = source !== 'study_material_only';
   const needsMaterial = source !== 'past_only';
 
@@ -87,7 +88,7 @@ function Wizard() {
   const bankNeed = source === 'past_only' ? total : source === 'both' ? split.bank : 0;
   const blocker = ((): string => {
     if (step === 0) {
-      if (courseId === NEW && (!newCourse.code.trim() || !newCourse.name.trim())) return 'Enter the new course code and name';
+      if (!courseId) return 'Choose a course';
       if (isNewTerm && !newLabel.trim()) return 'Enter the term, e.g. 2026/2027';
       if (!isNewTerm && !sessionId) return 'Choose a term';
       if (usesBank && bankYears.length && !years.length && ownBank === 0) return 'Pick at least one past-paper year';
@@ -112,8 +113,7 @@ function Wizard() {
     try {
       let sid = sessionId;
       if (isNewTerm) {
-        const c = courseId === NEW ? { code: newCourse.code.trim().toUpperCase(), name: newCourse.name.trim() } : { code: course!.code, name: course!.name };
-        const s = await api.post<Session>('/courses/ensure-session', { courseCode: c.code, courseName: c.name, sessionLabel: newLabel.trim() });
+        const s = await api.post<Session>('/courses/ensure-session', { courseId, sessionLabel: newLabel.trim() });
         sid = s.id;
       }
       setCreatedSessionId(sid);
@@ -139,13 +139,20 @@ function Wizard() {
 
   const num = (v: string) => Math.max(0, parseInt(v || '0', 10));
   const termLabel = isNewTerm ? newLabel || 'new term' : course?.sessions.find((s) => s.id === sessionId)?.label;
-  const courseLabel = courseId === NEW ? `${newCourse.code} ${newCourse.name}` : `${course?.code ?? ''} ${course?.name ?? ''}`;
+  const courseLabel = `${course?.code ?? ''} ${course?.name ?? ''}`;
 
   return (
     <>
       <PageHead title="New exam session" intro={courses ? `${courseLabel.trim() || 'Choose a course'}, ${termLabel ?? ''}` : undefined} crumbs={[['Exam sessions', '/sessions'], ['New exam session']]} />
       {loadError ? <Alert tone="error" title="Couldn’t load courses" action={<Button onClick={reload}>Try again</Button>}>{loadError}</Alert> : null}
-      <div className="flex max-w-[960px] flex-col gap-6">
+      {courses && !courses.length ? (
+        <EmptyState
+          title="No courses yet"
+          body={me.role === 'ADMIN' ? 'Add a course in Admin > Courses before starting a session.' : 'Ask an admin to add a course before starting a session.'}
+          action={me.role === 'ADMIN' ? <Link className="btnlink primary" href="/admin/courses">Go to Courses</Link> : undefined}
+        />
+      ) : null}
+      <div className={`flex max-w-[960px] flex-col gap-6 ${courses && !courses.length ? 'hidden' : ''}`}>
         <WizardSteps steps={STEPS} current={step} />
         <Panel className="flex flex-col gap-5 p-4 md:p-6">
           {step === 0 ? (
@@ -156,22 +163,15 @@ function Wizard() {
                   Course
                   <select value={courseId} onChange={(e) => { setCourseId(e.target.value); setYears(null); setSessionId(newestOf(courses?.find((x) => x.id === e.target.value))); }}>
                     {courses?.map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
-                    <option value={NEW}>New course…</option>
                   </select>
                 </label>
                 <label className="label">
                   Term
-                  <select value={courseId === NEW ? NEW : sessionId} disabled={courseId === NEW} onChange={(e) => setSessionId(e.target.value)}>
+                  <select value={sessionId} disabled={!courseId} onChange={(e) => setSessionId(e.target.value)}>
                     {[...(course?.sessions ?? [])].sort((a, b) => b.label.localeCompare(a.label)).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                     <option value={NEW}>New term…</option>
                   </select>
                 </label>
-                {courseId === NEW ? (
-                  <>
-                    <label className="label">Course code<input value={newCourse.code} onChange={(e) => setNewCourse({ ...newCourse, code: e.target.value })} placeholder="e.g. LOG301" /></label>
-                    <label className="label">Course name<input value={newCourse.name} onChange={(e) => setNewCourse({ ...newCourse, name: e.target.value })} placeholder="e.g. Movement Control" /></label>
-                  </>
-                ) : null}
                 {isNewTerm ? <label className="label">New term<input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="e.g. 2026/2027" /></label> : null}
               </div>
 
@@ -186,7 +186,7 @@ function Wizard() {
                 ]}
               />
 
-              {usesBank && courseId !== NEW ? (
+              {usesBank ? (
                 <fieldset className="m-0 flex flex-col gap-3 rounded-md border border-line p-4">
                   <legend className="t-heading px-1.5">Past-paper years to draw from</legend>
                   {yearsLoading ? <Spinner label="Counting past questions…" /> : null}

@@ -14,7 +14,10 @@ const NAV: { href: string; label: string; short: string; icon: GlyphName }[] = [
   { href: '/material', label: 'Study material', short: 'Material', icon: 'material' },
   { href: '/results', label: 'Results', short: 'Results', icon: 'results' },
 ];
-const ADMIN_NAV = { href: '/admin/users', label: 'Users', short: 'Users', icon: 'users' as GlyphName };
+const ADMIN_NAV: { href: string; label: string; short: string; icon: GlyphName }[] = [
+  { href: '/admin/courses', label: 'Courses', short: 'Courses', icon: 'page' },
+  { href: '/admin/users', label: 'Users', short: 'Users', icon: 'users' },
+];
 
 const initials = (u: User) =>
   u.fullName
@@ -31,7 +34,7 @@ export function Shell({ user, children }: { user: User; children: React.ReactNod
   const [signingOut, setSigningOut] = useState(false);
   const active = (href: string) => path === href || path.startsWith(href + '/');
   const roleLabel = user.role === 'ADMIN' ? 'Admin' : user.role === 'EXAM_OFFICER' ? 'Exam officer' : 'Instructor';
-  const nav = user.role === 'ADMIN' ? [...NAV, ADMIN_NAV] : NAV;
+  const nav = user.role === 'ADMIN' ? [...NAV, ...ADMIN_NAV] : NAV;
 
   async function signOut() {
     setSigningOut(true);

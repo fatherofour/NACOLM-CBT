@@ -1,8 +1,10 @@
 'use client';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Chip, EmptyState, Spinner } from '@/components/nc/basics';
 import { Glyph } from '@/components/nc/glyph';
 import { PageHead, Panel } from '@/components/shell/page-head';
+import { useUser } from '@/components/shell/user-context';
 import { api, qs, type Course, type Question, type Session, type SourceDocument } from '@/lib/api';
 import { useData } from '@/lib/use-data';
 
@@ -28,6 +30,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'n
 
 export function LibraryPage({ kind }: { kind: Kind }) {
   const t = COPY[kind];
+  const me = useUser();
   const courses = useData(() => api.get<Course[]>('/courses'), []);
   const [picked, setCourseId] = useState('');
   const courseId = picked || ([...(courses.data ?? [])].sort((a, b) => b.sessions.length - a.sessions.length)[0]?.id ?? '');
@@ -67,12 +70,19 @@ export function LibraryPage({ kind }: { kind: Kind }) {
         title={t.title}
         intro={t.intro}
         action={
-          <Button variant="primary" icon="upload" className="!h-11 justify-center md:!h-9" onClick={() => setOpen(true)} disabled={!courses.data}>
+          <Button variant="primary" icon="upload" className="!h-11 justify-center md:!h-9" onClick={() => setOpen(true)} disabled={!courses.data?.length}>
             {t.upload}
           </Button>
         }
       />
       {courses.error ? <Alert tone="error" title="Couldn’t load courses">{courses.error}</Alert> : null}
+      {courses.data && !courses.data.length ? (
+        <EmptyState
+          title="No courses yet"
+          body={me.role === 'ADMIN' ? 'Add a course in Admin > Courses before uploading.' : 'Ask an admin to add a course before uploading.'}
+          action={me.role === 'ADMIN' ? <Link className="btnlink primary" href="/admin/courses">Go to Courses</Link> : undefined}
+        />
+      ) : null}
 
       {open && courses.data ? (
         <UploadPanel
@@ -89,91 +99,95 @@ export function LibraryPage({ kind }: { kind: Kind }) {
         />
       ) : null}
 
-      <div className="mb-4 mt-2 flex flex-wrap items-end gap-3">
-        <label className="label">
-          Course
-          <select value={courseId} onChange={(e) => setCourseId(e.target.value)}>
-            {courses.data?.map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
-          </select>
-        </label>
-        <span className="pb-2 text-sm text-ink-muted">{docs.data ? `${docs.data.length} document${docs.data.length === 1 ? '' : 's'}` : ''}</span>
-      </div>
-
-      {kind === 'PAST_PAPER' && sessions.length ? (
-        <Panel className="mb-4 flex flex-col gap-3 p-4 md:px-5">
-          <h2 className="t-heading m-0">Approved past questions by year</h2>
-          <div className="flex flex-wrap gap-2">
-            {sessions.map((s) => (
-              <span key={s.id} className="flex flex-col rounded-md border border-line px-3 py-2">
-                <span className="font-[650]">{s.label}</span>
-                <span className="text-[13px] tabular-nums text-ink-muted">{bankCounts.data ? `${bankCounts.data[s.id] ?? 0} questions` : '…'}</span>
-              </span>
-            ))}
+      {courses.data?.length ? (
+        <>
+          <div className="mb-4 mt-2 flex flex-wrap items-end gap-3">
+            <label className="label">
+              Course
+              <select value={courseId} onChange={(e) => setCourseId(e.target.value)}>
+                {courses.data?.map((c) => <option key={c.id} value={c.id}>{c.code} {c.name}</option>)}
+              </select>
+            </label>
+            <span className="pb-2 text-sm text-ink-muted">{docs.data ? `${docs.data.length} document${docs.data.length === 1 ? '' : 's'}` : ''}</span>
           </div>
-          <p className="m-0 text-[13px] text-ink-muted">Questions from an uploaded paper join the bank once they’ve been entered and approved; uploading stores the paper itself.</p>
-        </Panel>
-      ) : null}
 
-      {deleting ? (
-        <div role="alertdialog" aria-labelledby="del-t" className="mb-4 flex flex-col gap-3 rounded-lg border-2 border-rejected bg-rejected-soft p-4">
-          <p id="del-t" className="m-0 font-[650]">Delete “{deleting.title}”?</p>
-          <p className="m-0 text-sm">The file is removed from the server. Questions already drafted from it stay in the bank.</p>
-          {delError ? <p className="m-0 text-sm font-semibold text-rejected">{delError}</p> : null}
-          <div className="nc-row">
-            <Button variant="danger" onClick={() => remove(deleting)}>Delete file</Button>
-            <Button variant="quiet" onClick={() => setDeleting(null)}>Cancel</Button>
-          </div>
-        </div>
-      ) : null}
+          {kind === 'PAST_PAPER' && sessions.length ? (
+            <Panel className="mb-4 flex flex-col gap-3 p-4 md:px-5">
+              <h2 className="t-heading m-0">Approved past questions by year</h2>
+              <div className="flex flex-wrap gap-2">
+                {sessions.map((s) => (
+                  <span key={s.id} className="flex flex-col rounded-md border border-line px-3 py-2">
+                    <span className="font-[650]">{s.label}</span>
+                    <span className="text-[13px] tabular-nums text-ink-muted">{bankCounts.data ? `${bankCounts.data[s.id] ?? 0} questions` : '…'}</span>
+                  </span>
+                ))}
+              </div>
+              <p className="m-0 text-[13px] text-ink-muted">Questions from an uploaded paper join the bank once they’ve been entered and approved; uploading stores the paper itself.</p>
+            </Panel>
+          ) : null}
 
-      {docs.error ? <Alert tone="error" title="Couldn’t load documents">{docs.error}</Alert> : null}
-      {docs.loading && !docs.data ? <Spinner label="Loading documents…" /> : null}
-      {docs.data && !docs.data.length ? (
-        <EmptyState title={t.empty} body="Upload a PDF or Word file to get started." action={<Button variant="primary" icon="upload" onClick={() => setOpen(true)}>{t.upload}</Button>} />
-      ) : null}
-      {docs.data?.length ? (
-        <Panel className="overflow-hidden">
-          <table className="hidden w-full border-collapse text-sm md:table">
-            <thead>
-              <tr className="bg-surface-sunken text-left text-ink-muted">
-                <th scope="col" className="px-5 py-2.5 font-semibold">Document</th>
-                <th scope="col" className="px-3 py-2.5 font-semibold">{t.term}</th>
-                <th scope="col" className="px-3 py-2.5 font-semibold">Uploaded</th>
-                <th scope="col" className="px-3 py-2.5 font-semibold">Status</th>
-                <th scope="col" className="px-5 py-2.5"><span className="nc-sr">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {docs.data.map((d) => (
-                <tr key={d.id} className="border-t border-line align-top">
-                  <td className="px-5 py-3">
-                    <div className="font-[650]">{d.title}</div>
+          {deleting ? (
+            <div role="alertdialog" aria-labelledby="del-t" className="mb-4 flex flex-col gap-3 rounded-lg border-2 border-rejected bg-rejected-soft p-4">
+              <p id="del-t" className="m-0 font-[650]">Delete “{deleting.title}”?</p>
+              <p className="m-0 text-sm">The file is removed from the server. Questions already drafted from it stay in the bank.</p>
+              {delError ? <p className="m-0 text-sm font-semibold text-rejected">{delError}</p> : null}
+              <div className="nc-row">
+                <Button variant="danger" onClick={() => remove(deleting)}>Delete file</Button>
+                <Button variant="quiet" onClick={() => setDeleting(null)}>Cancel</Button>
+              </div>
+            </div>
+          ) : null}
+
+          {docs.error ? <Alert tone="error" title="Couldn’t load documents">{docs.error}</Alert> : null}
+          {docs.loading && !docs.data ? <Spinner label="Loading documents…" /> : null}
+          {docs.data && !docs.data.length ? (
+            <EmptyState title={t.empty} body="Upload a PDF or Word file to get started." action={<Button variant="primary" icon="upload" onClick={() => setOpen(true)}>{t.upload}</Button>} />
+          ) : null}
+          {docs.data?.length ? (
+            <Panel className="overflow-hidden">
+              <table className="hidden w-full border-collapse text-sm md:table">
+                <thead>
+                  <tr className="bg-surface-sunken text-left text-ink-muted">
+                    <th scope="col" className="px-5 py-2.5 font-semibold">Document</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">{t.term}</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Uploaded</th>
+                    <th scope="col" className="px-3 py-2.5 font-semibold">Status</th>
+                    <th scope="col" className="px-5 py-2.5"><span className="nc-sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docs.data.map((d) => (
+                    <tr key={d.id} className="border-t border-line align-top">
+                      <td className="px-5 py-3">
+                        <div className="font-[650]">{d.title}</div>
+                        <div className="break-all text-xs text-ink-muted">{d.storagePath}</div>
+                      </td>
+                      <td className="px-3 py-3">{d.session?.label}</td>
+                      <td className="px-3 py-3">{fmt(d.uploadedAt)}</td>
+                      <td className="px-3 py-3"><DocStatus d={d} /></td>
+                      <td className="px-5 py-3 text-right"><Button variant="quiet" onClick={() => setDeleting(d)}>Delete</Button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <ul className="m-0 flex list-none flex-col p-0 md:hidden">
+                {docs.data.map((d) => (
+                  <li key={d.id} className="flex flex-col gap-1.5 border-t border-line px-4 py-3.5 first:border-t-0">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="font-[650]">{d.title}</div>
+                        <div className="text-[13px] text-ink-muted">{d.session?.label}, uploaded {fmt(d.uploadedAt)}</div>
+                      </div>
+                      <DocStatus d={d} />
+                    </div>
                     <div className="break-all text-xs text-ink-muted">{d.storagePath}</div>
-                  </td>
-                  <td className="px-3 py-3">{d.session?.label}</td>
-                  <td className="px-3 py-3">{fmt(d.uploadedAt)}</td>
-                  <td className="px-3 py-3"><DocStatus d={d} /></td>
-                  <td className="px-5 py-3 text-right"><Button variant="quiet" onClick={() => setDeleting(d)}>Delete</Button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <ul className="m-0 flex list-none flex-col p-0 md:hidden">
-            {docs.data.map((d) => (
-              <li key={d.id} className="flex flex-col gap-1.5 border-t border-line px-4 py-3.5 first:border-t-0">
-                <div className="flex items-start gap-2">
-                  <div className="flex-1">
-                    <div className="font-[650]">{d.title}</div>
-                    <div className="text-[13px] text-ink-muted">{d.session?.label}, uploaded {fmt(d.uploadedAt)}</div>
-                  </div>
-                  <DocStatus d={d} />
-                </div>
-                <div className="break-all text-xs text-ink-muted">{d.storagePath}</div>
-                <div><Button variant="quiet" className="!px-0" onClick={() => setDeleting(d)}>Delete</Button></div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
+                    <div><Button variant="quiet" className="!px-0" onClick={() => setDeleting(d)}>Delete</Button></div>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : null}
+        </>
       ) : null}
     </>
   );
@@ -220,7 +234,7 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
     setError('');
     try {
       let sid = sessionId;
-      if (sid === NEW) sid = (await api.post<Session>('/courses/ensure-session', { courseCode: course.code, courseName: course.name, sessionLabel: newLabel.trim() })).id;
+      if (sid === NEW) sid = (await api.post<Session>('/courses/ensure-session', { courseId: course.id, sessionLabel: newLabel.trim() })).id;
       const form = new FormData();
       form.set('file', file);
       form.set('sessionId', sid);
@@ -259,7 +273,7 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
           </label>
         ) : null}
       </div>
-      {!courses.length ? <Alert tone="caution" title="No courses yet">Create a course from New exam session first.</Alert> : null}
+      {!courses.length ? <Alert tone="caution" title="No courses yet">Ask an admin to add a course in Admin &gt; Courses first.</Alert> : null}
 
       <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-[1.5px] border-dashed border-line-strong bg-surface px-4 py-6 text-center">
         <Glyph name="upload" size={20} />
