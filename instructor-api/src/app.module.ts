@@ -13,6 +13,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { UsersModule } from './users/users.module.js';
 import { CandidatesModule } from './candidates/candidates.module.js';
 import { PackagesModule } from './packages/packages.module.js';
+import { QtiModule } from './qti/qti.module.js';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { PackagesModule } from './packages/packages.module.js';
     UsersModule,
     CandidatesModule,
     PackagesModule,
+    QtiModule,
     AuditModule,
     CoursesModule,
     DocumentsModule,
