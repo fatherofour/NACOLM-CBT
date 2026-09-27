@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"cbt.army.mil.ng/local-exam-server/internal/config"
 	"cbt.army.mil.ng/local-exam-server/internal/exam"
@@ -206,11 +208,27 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	st, err := s.store.GetSessionState(pkg.ExamID, req.CandidateID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load session: "+err.Error())
+		return
+	}
+	if st.SubmittedAt != nil {
+		writeError(w, http.StatusConflict, "this candidate has already submitted; responses can't be changed")
+		return
+	}
+
 	for _, resp := range req.Responses {
 		if err := s.store.RecordResponse(pkg.ExamID, req.CandidateID, resp.Position, resp.SelectedIndex, resp.AnswerText); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to record response: "+err.Error())
 			return
 		}
+	}
+
+	ref := strings.ToUpper(randomHex(2) + "-" + randomHex(2))
+	if _, err := s.store.MarkSubmitted(pkg.ExamID, req.CandidateID, ref, time.Now()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record submission: "+err.Error())
+		return
 	}
 
 	correct, total, err := s.store.AutoMarkMCQ(pkg.ExamID, req.CandidateID)
@@ -219,7 +237,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := map[string]any{"submitted": true, "mcq_correct": correct, "mcq_total": total}
+	result := map[string]any{"submitted": true, "reference": ref, "mcq_correct": correct, "mcq_total": total}
 	if pkg.PublishMode == "immediate" {
 		// Theory questions (if any) still need instructor marking, so this
 		// is a partial/objective-only score, not a final grade.

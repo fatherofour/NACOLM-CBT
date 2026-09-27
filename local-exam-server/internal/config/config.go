@@ -20,7 +20,17 @@ type Config struct {
 	// can sign in to the kiosk. CentreName is shown on the sign-in screen.
 	RosterPath string
 	CentreName string
+
+	// TLS for the LAN listener. Without these the server falls back to
+	// plain HTTP — candidate PINs and answers then travel in cleartext on
+	// the venue LAN. cmd/gen-cert makes a self-signed cert per venue (there
+	// is no real CA to reach from an air-gapped room), so this is "LAN
+	// traffic isn't plaintext," not "browsers trust this certificate."
+	TLSCertPath string
+	TLSKeyPath  string
 }
+
+func (c Config) TLSEnabled() bool { return c.TLSCertPath != "" && c.TLSKeyPath != "" }
 
 func FromEnv() (Config, error) {
 	cfg := Config{
@@ -30,12 +40,17 @@ func FromEnv() (Config, error) {
 		ExamID:      os.Getenv("CBT_EXAM_ID"),
 		RosterPath:  os.Getenv("CBT_ROSTER_PATH"),
 		CentreName:  getOr("CBT_CENTRE_NAME", "Exam centre"),
+		TLSCertPath: os.Getenv("CBT_TLS_CERT"),
+		TLSKeyPath:  os.Getenv("CBT_TLS_KEY"),
 	}
 	if cfg.PackagePath == "" {
 		return cfg, fmt.Errorf("CBT_PACKAGE_PATH is required (path to the synced .cbtpkg file)")
 	}
 	if cfg.ExamID == "" {
 		return cfg, fmt.Errorf("CBT_EXAM_ID is required")
+	}
+	if (cfg.TLSCertPath == "") != (cfg.TLSKeyPath == "") {
+		return cfg, fmt.Errorf("CBT_TLS_CERT and CBT_TLS_KEY must both be set, or neither")
 	}
 	return cfg, nil
 }

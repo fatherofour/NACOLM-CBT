@@ -1,8 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,6 +17,13 @@ var kioskColumns = []string{
 	`ALTER TABLE exam_sessions ADD COLUMN started_at TEXT`,
 	`ALTER TABLE exam_sessions ADD COLUMN deadline_at TEXT`,
 	`ALTER TABLE exam_sessions ADD COLUMN submit_reference TEXT`,
+	// SHA-256 of the candidate's final answers, computed the instant
+	// submission is locked in — see MarkSubmitted. Lets anyone later prove
+	// the stored responses are exactly what was submitted, independent of
+	// trg_lock_responses_after_submit (which stops the write; this lets you
+	// detect it if that were ever bypassed, e.g. by editing the DB file
+	// directly with the server stopped).
+	`ALTER TABLE exam_sessions ADD COLUMN response_hash TEXT`,
 }
 
 func (s *Store) migrateKiosk() error {
@@ -26,11 +37,12 @@ func (s *Store) migrateKiosk() error {
 
 // SessionState is one candidate's progress through the sitting.
 type SessionState struct {
-	CheckedIn   bool
-	StartedAt   *time.Time
-	DeadlineAt  *time.Time
-	SubmittedAt *time.Time
-	Reference   string
+	CheckedIn    bool
+	StartedAt    *time.Time
+	DeadlineAt   *time.Time
+	SubmittedAt  *time.Time
+	Reference    string
+	ResponseHash string // set once, alongside SubmittedAt — see MarkSubmitted
 }
 
 func parseTime(v sql.NullString) *time.Time {
@@ -45,18 +57,18 @@ func parseTime(v sql.NullString) *time.Time {
 }
 
 func (s *Store) GetSessionState(examID, candidateID string) (SessionState, error) {
-	var started, deadline, submitted, ref sql.NullString
+	var started, deadline, submitted, ref, hash sql.NullString
 	err := s.db.QueryRow(
-		`SELECT started_at, deadline_at, submitted_at, submit_reference FROM exam_sessions WHERE exam_id = ? AND candidate_id = ?`,
+		`SELECT started_at, deadline_at, submitted_at, submit_reference, response_hash FROM exam_sessions WHERE exam_id = ? AND candidate_id = ?`,
 		examID, candidateID,
-	).Scan(&started, &deadline, &submitted, &ref)
+	).Scan(&started, &deadline, &submitted, &ref, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SessionState{}, nil
 	}
 	if err != nil {
 		return SessionState{}, err
 	}
-	return SessionState{CheckedIn: true, StartedAt: parseTime(started), DeadlineAt: parseTime(deadline), SubmittedAt: parseTime(submitted), Reference: ref.String}, nil
+	return SessionState{CheckedIn: true, StartedAt: parseTime(started), DeadlineAt: parseTime(deadline), SubmittedAt: parseTime(submitted), Reference: ref.String, ResponseHash: hash.String}, nil
 }
 
 // StartClock records when the candidate pressed Start and their deadline.
@@ -71,10 +83,19 @@ func (s *Store) StartClock(examID, candidateID string, now time.Time, duration t
 	return err
 }
 
-// MarkSubmitted closes the candidate's paper. Returns false if it was
-// already submitted.
+// MarkSubmitted closes the candidate's paper and, in the same transaction,
+// stamps a SHA-256 of their final answers (trg_lock_responses_after_submit
+// then stops those answers changing). Returns false if it was already
+// submitted — a no-op, not an error, so a retried request from a flaky
+// kiosk connection can't fail the candidate's submission.
 func (s *Store) MarkSubmitted(examID, candidateID, reference string, now time.Time) (bool, error) {
-	res, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(
 		`UPDATE exam_sessions SET submitted_at = ?, submit_reference = ?
 		 WHERE exam_id = ? AND candidate_id = ? AND submitted_at IS NULL`,
 		now.UTC().Format(time.RFC3339), reference, examID, candidateID,
@@ -83,7 +104,56 @@ func (s *Store) MarkSubmitted(examID, candidateID, reference string, now time.Ti
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n == 1, err
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+
+	hash, err := responseHash(tx, examID, candidateID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`UPDATE exam_sessions SET response_hash = ? WHERE exam_id = ? AND candidate_id = ?`, hash, examID, candidateID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// responseHash is the tamper-evidence value MarkSubmitted stores: a SHA-256
+// over every question's position and final answer, in position order, so
+// two candidates who answer identically get the same hash and any later
+// change to a stored answer is detectable by recomputing it.
+func responseHash(tx *sql.Tx, examID, candidateID string) (string, error) {
+	rows, err := tx.Query(
+		`SELECT question_position, response_index, response_text FROM exam_instances
+		 WHERE exam_id = ? AND candidate_id = ? ORDER BY question_position`,
+		examID, candidateID,
+	)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	h := sha256.New()
+	for rows.Next() {
+		var position int
+		var idx sql.NullInt64
+		var text sql.NullString
+		if err := rows.Scan(&position, &idx, &text); err != nil {
+			return "", err
+		}
+		idxStr := ""
+		if idx.Valid {
+			idxStr = strconv.FormatInt(idx.Int64, 10)
+		}
+		fmt.Fprintf(h, "%d|%s|%s\n", position, idxStr, text.String)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // SavedAnswer is what a candidate has entered so far for one question.

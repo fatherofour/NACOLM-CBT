@@ -187,7 +187,7 @@ func (s *Server) kioskLogin(w http.ResponseWriter, r *http.Request) {
 	k.tokens[token] = c.ServiceNumber
 	k.mu.Unlock()
 
-	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: token, Path: "/kiosk", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: token, Path: "/kiosk", HttpOnly: true, Secure: s.cfg.TLSEnabled(), SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"candidate": c})
 }
 
@@ -197,7 +197,7 @@ func (s *Server) kioskLogout(w http.ResponseWriter, r *http.Request) {
 		delete(s.kiosk.tokens, cookie.Value)
 		s.kiosk.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: "", Path: "/kiosk", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: "", Path: "/kiosk", MaxAge: -1, HttpOnly: true, Secure: s.cfg.TLSEnabled(), SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"signed_out": true})
 }
 
@@ -233,10 +233,11 @@ func metaFor(pkg *models.ExamPackage) paperMeta {
 }
 
 type sessionView struct {
-	Started     bool       `json:"started"`
-	Deadline    *time.Time `json:"deadline,omitempty"`
-	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
-	Reference   string     `json:"reference,omitempty"`
+	Started      bool       `json:"started"`
+	Deadline     *time.Time `json:"deadline,omitempty"`
+	SubmittedAt  *time.Time `json:"submitted_at,omitempty"`
+	Reference    string     `json:"reference,omitempty"`
+	ResponseHash string     `json:"response_hash,omitempty"` // proof the stored answers match what was submitted — see store.MarkSubmitted
 }
 
 func (s *Server) kioskMe(w http.ResponseWriter, r *http.Request, c roster.Candidate) {
@@ -249,7 +250,7 @@ func (s *Server) kioskMe(w http.ResponseWriter, r *http.Request, c roster.Candid
 			return
 		}
 		resp["paper"] = metaFor(pkg)
-		resp["session"] = sessionView{Started: st.StartedAt != nil, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference}
+		resp["session"] = sessionView{Started: st.StartedAt != nil, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference, ResponseHash: st.ResponseHash}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -301,7 +302,7 @@ func (s *Server) kioskStart(w http.ResponseWriter, r *http.Request, c roster.Can
 		"paper":      metaFor(pkg),
 		"questions":  questions,
 		"answers":    answers,
-		"session":    sessionView{Started: true, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference},
+		"session":    sessionView{Started: true, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference, ResponseHash: st.ResponseHash},
 		"server_now": time.Now().UTC(),
 	})
 }
@@ -421,10 +422,11 @@ func (s *Server) kioskSubmit(w http.ResponseWriter, r *http.Request, c roster.Ca
 		}
 	}
 	resp := map[string]any{
-		"submitted":    true,
-		"submitted_at": st.SubmittedAt,
-		"reference":    st.Reference,
-		"publish_mode": pkg.PublishMode,
+		"submitted":     true,
+		"submitted_at":  st.SubmittedAt,
+		"reference":     st.Reference,
+		"response_hash": st.ResponseHash,
+		"publish_mode":  pkg.PublishMode,
 		"theory":       theory,
 	}
 	if pkg.PublishMode == "immediate" {

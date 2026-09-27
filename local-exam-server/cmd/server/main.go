@@ -40,7 +40,15 @@ func main() {
 
 	log.Printf("local exam server listening on %s (exam=%s, package=%s)", cfg.ListenAddr, cfg.ExamID, cfg.PackagePath)
 	log.Printf("waiting for POST /release before any candidate can check in")
-	if err := http.ListenAndServe(cfg.ListenAddr, server.Router()); err != nil {
+
+	if cfg.TLSEnabled() {
+		log.Printf("TLS enabled — candidate PINs and answers are encrypted on the venue LAN")
+		err = http.ListenAndServeTLS(cfg.ListenAddr, cfg.TLSCertPath, cfg.TLSKeyPath, server.Router())
+	} else {
+		log.Printf("CBT_TLS_CERT/CBT_TLS_KEY not set — running plain HTTP; traffic on the venue LAN is NOT encrypted. Run cmd/gen-cert to fix this.")
+		err = http.ListenAndServe(cfg.ListenAddr, server.Router())
+	}
+	if err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }

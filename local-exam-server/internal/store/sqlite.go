@@ -45,6 +45,28 @@ CREATE TABLE IF NOT EXISTS exam_sessions (
     PRIMARY KEY (exam_id, candidate_id)
 );
 
+-- Once a candidate has submitted, their answers must not change — that's
+-- the whole point of a "submission." These triggers enforce it at the
+-- database layer, not just in handler code, so a bug in a handler (or a
+-- script run directly against the DB) can't quietly rewrite an answer after
+-- the fact. is_correct and theory_score are exempt: those are the system's
+-- and the instructor's marking output, written *because* of the submission,
+-- not part of what the candidate is being held to.
+CREATE TRIGGER IF NOT EXISTS trg_lock_responses_after_submit
+BEFORE UPDATE OF response_index, response_text ON exam_instances
+WHEN (SELECT submitted_at FROM exam_sessions
+      WHERE exam_id = OLD.exam_id AND candidate_id = OLD.candidate_id) IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'responses are immutable once the candidate has submitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_lock_submitted_at
+BEFORE UPDATE OF submitted_at ON exam_sessions
+WHEN OLD.submitted_at IS NOT NULL
+BEGIN
+  SELECT RAISE(ABORT, 'submitted_at cannot be changed once set');
+END;
+
 -- How many times each pool item has been drawn to a candidate so far this
 -- sitting. Read by randomize.GenerateInstance to spread draws evenly across
 -- the pool instead of leaving it to chance — see internal/randomize.
@@ -225,13 +247,11 @@ func (s *Store) AutoMarkMCQ(examID, candidateID string) (correct int, total int,
 		}
 	}
 
-	if _, err := s.db.Exec(
-		`UPDATE exam_sessions SET submitted_at = ? WHERE exam_id = ? AND candidate_id = ?`,
-		time.Now().UTC().Format(time.RFC3339), examID, candidateID,
-	); err != nil {
-		return 0, 0, err
-	}
-
+	// Marking is separate from submitting — see MarkSubmitted, which is the
+	// only thing allowed to set submitted_at (once, ever; enforced by
+	// trg_lock_submitted_at). This used to also stamp submitted_at here,
+	// which meant calling AutoMarkMCQ twice silently pushed the recorded
+	// submission time forward each time.
 	return correct, total, nil
 }
 

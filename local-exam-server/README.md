@@ -33,6 +33,23 @@ That call is the runtime equivalent of the invigilator triggering the
 release key at the scheduled exam start time — the key is never read from
 disk alongside the package.
 
+## TLS
+
+Without `CBT_TLS_CERT`/`CBT_TLS_KEY` the server runs plain HTTP, so
+candidate PINs and answers travel unencrypted on the venue LAN. There's no
+real CA reachable from an air-gapped exam room, so generate a self-signed
+cert per venue with `cmd/gen-cert`:
+
+```bash
+go run ./cmd/gen-cert -host <venue-lan-ip>,localhost -out ./certs
+CBT_TLS_CERT=./certs/cert.pem CBT_TLS_KEY=./certs/key.pem CBT_PACKAGE_PATH=... go run ./cmd/server
+```
+
+Candidate browsers will show a "not trusted" warning for the self-signed
+cert — installing it on the venue's lab machines ahead of time avoids that,
+but isn't required for the encryption itself to work. The kiosk's session
+cookie automatically gets the `Secure` flag once TLS is on.
+
 ## Invigilator console
 
 Releasing the paper and watching who's signed in is done at
@@ -169,8 +186,13 @@ not to auto-finalize like objective questions do.
 Implemented: package decryption (interop-tested against Python), the
 stratified/exposure-controlled/salted randomization engine above, the
 keyword theory-marking engine, SQLite persistence, a working check-in →
-answer → submit → auto-mark HTTP flow, and the invigilator console for
-release + live candidate status.
+answer → submit → auto-mark HTTP flow, the invigilator console for release +
+live candidate status, TLS on the LAN listener, and DB-enforced immutability
+of submitted answers (a candidate's responses can't be changed once
+submitted — enforced by SQLite triggers, not just handler code — and a
+SHA-256 of the final answers is stamped at submit time so tampering is
+detectable even if that were ever bypassed; see `internal/store/kiosk.go`'s
+`MarkSubmitted`).
 
 Deliberately deferred:
 - Sync client that pulls the package pre-exam and pushes results post-exam
@@ -183,4 +205,5 @@ Deliberately deferred:
   regenerating the roster CSV and restarting with it
 - Theory answers at the centre: the kiosk collects them, but the keyword
   scheme isn't in the package yet, so they aren't auto-scored on submit
-- TLS on the LAN listener (local CA) and auth on the HTTP endpoints
+- Auth on the HTTP endpoints (release, checkin, submit) — TLS is now done,
+  see below
