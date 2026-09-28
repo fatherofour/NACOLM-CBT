@@ -1,4 +1,4 @@
-// In-memory lockout after repeated failed logins for the same service number.
+// In-memory lockout after repeated failed logins for the same username.
 // Single-process only; if the API is ever run as several instances, move this
 // to the database or Redis.
 const MAX_FAILURES = 5;

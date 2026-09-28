@@ -41,6 +41,11 @@ enum UserRole {
 // accounts are created with scripts/create-user.mjs, not self-registration.
 model User {
   id            String        @id @default(cuid())
+  // Sign-in identifier. Separate from serviceNumber (their real Army
+  // service number, kept for identity/audit — see decorators.ts's
+  // actorName) because a service number is public/guessable and this
+  // isn't meant to double as a secret-adjacent login credential.
+  username      String        @unique
   serviceNumber String        @unique
   rank          String
   fullName      String

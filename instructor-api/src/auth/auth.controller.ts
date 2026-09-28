@@ -14,7 +14,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { token, expiresAt, user } = await this.auth.login(dto.serviceNumber, dto.password, {
+    const { token, expiresAt, user } = await this.auth.login(dto.username, dto.password, {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });

@@ -3,6 +3,7 @@ import type { UserRole } from '../generated/prisma/enums.js';
 
 export interface SessionUser {
   id: string;
+  username: string;
   serviceNumber: string;
   rank: string;
   fullName: string;

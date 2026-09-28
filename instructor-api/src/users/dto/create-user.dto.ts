@@ -3,6 +3,11 @@ import { UserRole } from '../../generated/prisma/enums.js';
 
 export class CreateUserDto {
   @IsString()
+  @MinLength(3)
+  @MaxLength(40)
+  username!: string;
+
+  @IsString()
   @MinLength(1)
   @MaxLength(40)
   serviceNumber!: string;

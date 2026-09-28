@@ -18,8 +18,8 @@ export class AuthService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async login(serviceNumber: string, password: string, meta: { ip?: string; userAgent?: string }) {
-    const key = serviceNumber.trim().toUpperCase();
+  async login(username: string, password: string, meta: { ip?: string; userAgent?: string }) {
+    const key = username.trim().toLowerCase();
     const locked = this.throttle.lockedFor(key);
     if (locked > 0) {
       const minutes = Math.ceil(locked / 60000);
@@ -29,11 +29,11 @@ export class AuthService {
       );
     }
 
-    const user = await this.prisma.user.findUnique({ where: { serviceNumber: key } });
+    const user = await this.prisma.user.findUnique({ where: { username: key } });
     const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
     if (!user || !ok || !user.active) {
       this.throttle.recordFailure(key);
-      throw new UnauthorizedException('Service number or password is incorrect.');
+      throw new UnauthorizedException('Username or password is incorrect.');
     }
     this.throttle.recordSuccess(key);
 
@@ -76,8 +76,8 @@ export class AuthService {
   }
 }
 
-function toSessionUser(u: { id: string; serviceNumber: string; rank: string; fullName: string; role: SessionUser['role'] }): SessionUser {
-  return { id: u.id, serviceNumber: u.serviceNumber, rank: u.rank, fullName: u.fullName, role: u.role };
+function toSessionUser(u: { id: string; username: string; serviceNumber: string; rank: string; fullName: string; role: SessionUser['role'] }): SessionUser {
+  return { id: u.id, username: u.username, serviceNumber: u.serviceNumber, rank: u.rank, fullName: u.fullName, role: u.role };
 }
 
 export function readCookie(header: string | undefined, name: string): string | undefined {

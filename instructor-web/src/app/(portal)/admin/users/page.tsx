@@ -14,7 +14,7 @@ export default function UsersPage() {
   const { data: users, error, loading, reload } = useData(() => api.get<ManagedUser[]>('/users'), []);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<{ serviceNumber: string; password: string } | null>(null);
+  const [revealed, setRevealed] = useState<{ username: string; password: string } | null>(null);
 
   if (me.role !== 'ADMIN') {
     return (
@@ -26,7 +26,7 @@ export default function UsersPage() {
     <>
       <PageHead
         title="Users"
-        intro="Create and manage sign-in accounts. Every account signs in with a service number and password — there’s no self-registration."
+        intro="Create and manage sign-in accounts. Every account signs in with a username and password — there’s no self-registration."
         action={
           <Button variant="primary" icon="plus" className="!h-11 justify-center md:!h-9" onClick={() => setCreating(true)} disabled={!users}>
             New user
@@ -35,7 +35,7 @@ export default function UsersPage() {
       />
 
       {revealed ? (
-        <Alert tone="info" title={`Password for ${revealed.serviceNumber}`} action={<Button variant="quiet" onClick={() => setRevealed(null)}>Dismiss</Button>}>
+        <Alert tone="info" title={`Password for ${revealed.username}`} action={<Button variant="quiet" onClick={() => setRevealed(null)}>Dismiss</Button>}>
           <p className="m-0">
             <code className="rounded bg-surface-sunken px-2 py-1 font-mono text-sm">{revealed.password}</code>
           </p>
@@ -46,10 +46,10 @@ export default function UsersPage() {
       {creating ? (
         <CreatePanel
           onClose={() => setCreating(false)}
-          onCreated={async (serviceNumber, password) => {
+          onCreated={async (username, password) => {
             setCreating(false);
             await reload();
-            if (password) setRevealed({ serviceNumber, password });
+            if (password) setRevealed({ username, password });
           }}
         />
       ) : null}
@@ -63,7 +63,8 @@ export default function UsersPage() {
           <table className="hidden w-full border-collapse text-sm md:table">
             <thead>
               <tr className="bg-surface-sunken text-left text-ink-muted">
-                <th scope="col" className="px-5 py-2.5 font-semibold">Service number</th>
+                <th scope="col" className="px-5 py-2.5 font-semibold">Username</th>
+                <th scope="col" className="px-3 py-2.5 font-semibold">Service number</th>
                 <th scope="col" className="px-3 py-2.5 font-semibold">Rank and name</th>
                 <th scope="col" className="px-3 py-2.5 font-semibold">Role</th>
                 <th scope="col" className="px-3 py-2.5 font-semibold">Status</th>
@@ -86,7 +87,8 @@ export default function UsersPage() {
                   />
                 ) : (
                   <tr key={u.id} className="border-t border-line align-middle">
-                    <td className="px-5 py-3 font-mono">{u.serviceNumber}</td>
+                    <td className="px-5 py-3 font-mono">{u.username}</td>
+                    <td className="px-3 py-3 font-mono">{u.serviceNumber}</td>
                     <td className="px-3 py-3">{u.rank} {u.fullName}</td>
                     <td className="px-3 py-3">{ROLE_LABEL[u.role]}</td>
                     <td className="px-3 py-3">
@@ -99,7 +101,7 @@ export default function UsersPage() {
                         isSelf={u.id === me.id}
                         onEdit={() => setEditingId(u.id)}
                         onReload={reload}
-                        onPasswordReset={(password) => setRevealed({ serviceNumber: u.serviceNumber, password })}
+                        onPasswordReset={(password) => setRevealed({ username: u.username, password })}
                       />
                     </td>
                   </tr>
@@ -113,7 +115,7 @@ export default function UsersPage() {
               <li key={u.id} className="flex flex-col gap-2 border-t border-line px-4 py-3.5 first:border-t-0">
                 <div className="flex items-start gap-2">
                   <div className="flex-1">
-                    <div className="font-mono text-xs text-ink-muted">{u.serviceNumber}</div>
+                    <div className="font-mono text-xs text-ink-muted">{u.username} · {u.serviceNumber}</div>
                     <div className="font-[650]">{u.rank} {u.fullName}</div>
                     <div className="text-[13px] text-ink-muted">{ROLE_LABEL[u.role]}, since {fmt(u.createdAt)}</div>
                   </div>
@@ -124,7 +126,7 @@ export default function UsersPage() {
                   isSelf={u.id === me.id}
                   onEdit={() => setEditingId(u.id)}
                   onReload={reload}
-                  onPasswordReset={(password) => setRevealed({ serviceNumber: u.serviceNumber, password })}
+                  onPasswordReset={(password) => setRevealed({ username: u.username, password })}
                 />
               </li>
             ))}
@@ -186,6 +188,7 @@ function RowActions({
 }
 
 function EditRow({ user, isSelf, onCancel, onSaved }: { user: ManagedUser; isSelf: boolean; onCancel: () => void; onSaved: () => Promise<void> }) {
+  const [username, setUsername] = useState(user.username);
   const [rank, setRank] = useState(user.rank);
   const [fullName, setFullName] = useState(user.fullName);
   const [role, setRole] = useState<Role>(user.role);
@@ -196,7 +199,7 @@ function EditRow({ user, isSelf, onCancel, onSaved }: { user: ManagedUser; isSel
     setBusy(true);
     setError('');
     try {
-      await api.patch(`/users/${user.id}`, { rank: rank.trim(), fullName: fullName.trim(), role });
+      await api.patch(`/users/${user.id}`, { username: username.trim(), rank: rank.trim(), fullName: fullName.trim(), role });
       await onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save.');
@@ -207,7 +210,8 @@ function EditRow({ user, isSelf, onCancel, onSaved }: { user: ManagedUser; isSel
 
   return (
     <tr className="border-t border-line bg-surface-sunken align-middle">
-      <td className="px-5 py-3 font-mono">{user.serviceNumber}</td>
+      <td className="px-5 py-3"><input value={username} onChange={(e) => setUsername(e.target.value)} className="font-mono" placeholder="Username" /></td>
+      <td className="px-3 py-3 font-mono">{user.serviceNumber}</td>
       <td className="px-3 py-3">
         <div className="flex gap-2">
           <input value={rank} onChange={(e) => setRank(e.target.value)} className="!w-20" placeholder="Rank" />
@@ -226,7 +230,7 @@ function EditRow({ user, isSelf, onCancel, onSaved }: { user: ManagedUser; isSel
       </td>
       <td className="px-5 py-3 text-right">
         <div className="flex justify-end gap-2">
-          <Button variant="primary" disabled={busy || !rank.trim() || !fullName.trim()} onClick={save}>Save</Button>
+          <Button variant="primary" disabled={busy || !username.trim() || !rank.trim() || !fullName.trim()} onClick={save}>Save</Button>
           <Button variant="quiet" disabled={busy} onClick={onCancel}>Cancel</Button>
         </div>
       </td>
@@ -234,7 +238,8 @@ function EditRow({ user, isSelf, onCancel, onSaved }: { user: ManagedUser; isSel
   );
 }
 
-function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (serviceNumber: string, password?: string) => void }) {
+function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (username: string, password?: string) => void }) {
+  const [username, setUsername] = useState('');
   const [serviceNumber, setServiceNumber] = useState('');
   const [rank, setRank] = useState('');
   const [fullName, setFullName] = useState('');
@@ -243,20 +248,21 @@ function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const ready = serviceNumber.trim() && rank.trim() && fullName.trim() && (!password || password.length >= 10);
+  const ready = username.trim().length >= 3 && serviceNumber.trim() && rank.trim() && fullName.trim() && (!password || password.length >= 10);
 
   async function create() {
     setBusy(true);
     setError('');
     try {
-      const r = await api.post<{ user: { serviceNumber: string }; generatedPassword?: string }>('/users', {
+      const r = await api.post<{ user: { username: string }; generatedPassword?: string }>('/users', {
+        username: username.trim(),
         serviceNumber: serviceNumber.trim(),
         rank: rank.trim(),
         fullName: fullName.trim(),
         role,
         ...(password ? { password } : {}),
       });
-      onCreated(r.user.serviceNumber, r.generatedPassword);
+      onCreated(r.user.username, r.generatedPassword);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create the account.');
     } finally {
@@ -269,8 +275,8 @@ function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <h2 id="new-user-t" className="t-title m-0">New user</h2>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="label">
-          Service number
-          <input value={serviceNumber} onChange={(e) => setServiceNumber(e.target.value)} placeholder="e.g. NA/19/4411" />
+          Username
+          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. o.nwosu" autoCapitalize="none" spellCheck={false} />
         </label>
         <label className="label">
           Role
@@ -279,6 +285,10 @@ function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
             <option value="EXAM_OFFICER">Exam officer</option>
             <option value="ADMIN">Admin</option>
           </select>
+        </label>
+        <label className="label">
+          Service number
+          <input value={serviceNumber} onChange={(e) => setServiceNumber(e.target.value)} placeholder="e.g. NA/19/4411" />
         </label>
         <label className="label">
           Rank

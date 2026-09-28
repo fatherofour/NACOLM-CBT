@@ -10,7 +10,7 @@ const safeNext = (n: string | null) => (n && n.startsWith('/') && !n.startsWith(
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [serviceNumber, setServiceNumber] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
@@ -19,8 +19,8 @@ export function LoginForm() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (!serviceNumber.trim() || !password) {
-      setError('Enter your service number and password.');
+    if (!username.trim() || !password) {
+      setError('Enter your username and password.');
       return;
     }
     setBusy(true);
@@ -28,7 +28,7 @@ export function LoginForm() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ serviceNumber: serviceNumber.trim(), password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -49,7 +49,7 @@ export function LoginForm() {
     <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
       <div className="flex flex-col gap-1">
         <h2 className="t-display m-0">Sign in</h2>
-        <p className="m-0 text-ink-muted">Use your service number and portal password.</p>
+        <p className="m-0 text-ink-muted">Use your username and portal password.</p>
       </div>
 
       {error ? (
@@ -59,16 +59,16 @@ export function LoginForm() {
       ) : null}
 
       <label className="label">
-        Service number
+        Username
         <input
-          name="serviceNumber"
+          name="username"
           autoComplete="username"
-          autoCapitalize="characters"
+          autoCapitalize="none"
           spellCheck={false}
           inputMode="text"
-          placeholder="e.g. NA/19/4411"
-          value={serviceNumber}
-          onChange={(e) => setServiceNumber(e.target.value)}
+          placeholder="e.g. o.nwosu"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           required
           className="h-12 !text-base"
         />

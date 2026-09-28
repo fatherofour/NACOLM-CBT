@@ -4,6 +4,12 @@ import { UserRole } from '../../generated/prisma/enums.js';
 export class UpdateUserDto {
   @IsOptional()
   @IsString()
+  @MinLength(3)
+  @MaxLength(40)
+  username?: string;
+
+  @IsOptional()
+  @IsString()
   @MinLength(1)
   @MaxLength(60)
   rank?: string;

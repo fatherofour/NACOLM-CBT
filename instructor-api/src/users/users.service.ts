@@ -12,6 +12,7 @@ const generatePassword = () => randomBytes(12).toString('base64url');
 
 const PUBLIC_FIELDS = {
   id: true,
+  username: true,
   serviceNumber: true,
   rank: true,
   fullName: true,
@@ -25,24 +26,27 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   list() {
-    return this.prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: [{ active: 'desc' }, { serviceNumber: 'asc' }] });
+    return this.prisma.user.findMany({ select: PUBLIC_FIELDS, orderBy: [{ active: 'desc' }, { username: 'asc' }] });
   }
 
   async create(dto: CreateUserDto) {
+    const username = dto.username.trim().toLowerCase();
     const serviceNumber = dto.serviceNumber.trim().toUpperCase();
     const password = dto.password ?? generatePassword();
     const passwordHash = await hashPassword(password);
 
     try {
       const user = await this.prisma.user.create({
-        data: { serviceNumber, rank: dto.rank.trim(), fullName: dto.fullName.trim(), role: dto.role, passwordHash },
+        data: { username, serviceNumber, rank: dto.rank.trim(), fullName: dto.fullName.trim(), role: dto.role, passwordHash },
         select: PUBLIC_FIELDS,
       });
       // Only returned when the caller didn't supply one — this is the one
       // moment the plaintext password exists outside the admin's own head.
       return { user, generatedPassword: dto.password ? undefined : password };
     } catch (err) {
-      if (isUniqueViolation(err)) throw new ConflictException(`Service number ${serviceNumber} is already in use.`);
+      const field = uniqueViolationField(err);
+      if (field === 'username') throw new ConflictException(`Username ${username} is already in use.`);
+      if (field === 'serviceNumber') throw new ConflictException(`Service number ${serviceNumber} is already in use.`);
       throw err;
     }
   }
@@ -58,6 +62,7 @@ export class UsersService {
     }
 
     const data = { ...dto };
+    if (dto.username) data.username = dto.username.trim().toLowerCase();
     if (dto.rank) data.rank = dto.rank.trim();
     if (dto.fullName) data.fullName = dto.fullName.trim();
 
@@ -65,6 +70,7 @@ export class UsersService {
       .update({ where: { id }, data, select: PUBLIC_FIELDS })
       .catch((err) => {
         if (isNotFound(err)) throw new NotFoundException('User not found.');
+        if (uniqueViolationField(err) === 'username') throw new ConflictException(`Username ${data.username} is already in use.`);
         throw err;
       });
 
@@ -96,8 +102,22 @@ export class UsersService {
   }
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2002';
+// Prisma's P2002 error identifies which unique constraint fired, so the
+// caller can say exactly which field collided (username vs. serviceNumber)
+// instead of a generic "already in use". Prisma 7's @prisma/adapter-pg
+// driver puts the constraint's index name (e.g. "User_username_key") at
+// meta.driverAdapterError.cause.constraint.index rather than the classic
+// meta.target column-name array — this checks both shapes.
+function uniqueViolationField(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null || (err as { code?: string }).code !== 'P2002') return null;
+  const meta = (err as { meta?: Record<string, unknown> }).meta;
+  const target = meta?.target as string[] | string | undefined;
+  if (target) return Array.isArray(target) ? (target[0] ?? null) : target;
+
+  const driverErr = meta?.driverAdapterError as { cause?: { constraint?: { index?: string } } } | undefined;
+  const index = driverErr?.cause?.constraint?.index;
+  const match = index ? /^\w+_(.+)_key$/.exec(index) : null;
+  return match ? match[1] : (index ?? null);
 }
 function isNotFound(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'P2025';
