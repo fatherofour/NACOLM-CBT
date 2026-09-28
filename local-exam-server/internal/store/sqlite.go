@@ -86,6 +86,21 @@ CREATE TABLE IF NOT EXISTS exam_release (
     salt_hex     TEXT NOT NULL,
     released_at  TEXT NOT NULL
 );
+
+-- Kiosk-reported integrity events: the candidate's tab was hidden, the
+-- window lost focus, or they left fullscreen. This is a deterrent and an
+-- audit trail, not proof of malpractice on its own — a browser can only
+-- ever detect and log these, never truly prevent them (see
+-- local-exam-server/README.md). The invigilator console surfaces counts so
+-- a human, physically in the room, decides what to do about it.
+CREATE TABLE IF NOT EXISTS exam_violations (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_id      TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    occurred_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exam_violations_candidate ON exam_violations(exam_id, candidate_id);
 `
 
 type Store struct {

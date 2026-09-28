@@ -76,6 +76,7 @@ func (s *Server) registerKiosk(mux *http.ServeMux) {
 	mux.HandleFunc("POST /kiosk/api/start", s.withCandidate(s.kioskStart))
 	mux.HandleFunc("PUT /kiosk/api/answer", s.withCandidate(s.kioskAnswer))
 	mux.HandleFunc("POST /kiosk/api/submit", s.withCandidate(s.kioskSubmit))
+	mux.HandleFunc("POST /kiosk/api/violation", s.withCandidate(s.kioskViolation))
 }
 
 func queryString(r *http.Request) string {
@@ -379,6 +380,38 @@ func (s *Server) kioskAnswer(w http.ResponseWriter, r *http.Request, c roster.Ca
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "position": req.Position})
+}
+
+// violationKinds are the only events app.js reports — anything else is
+// rejected rather than silently stored, so this table can't fill up with
+// arbitrary client-supplied strings.
+var violationKinds = map[string]bool{"tab_hidden": true, "window_blur": true, "fullscreen_exit": true}
+
+type violationRequest struct {
+	Kind string `json:"kind"`
+}
+
+// kioskViolation logs a browser-side integrity signal — a hidden tab, a
+// lost window focus, or leaving fullscreen. It never blocks or fails the
+// candidate's exam: a browser can only ever detect and record these, not
+// truly prevent them (see README.md). The invigilator console surfaces the
+// running count per candidate so a human in the room decides what to do.
+func (s *Server) kioskViolation(w http.ResponseWriter, r *http.Request, c roster.Candidate) {
+	pkg, _, released := s.isReleased()
+	if !released {
+		writeJSON(w, http.StatusOK, map[string]any{"recorded": false})
+		return
+	}
+	var req violationRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&req); err != nil || !violationKinds[req.Kind] {
+		writeError(w, http.StatusBadRequest, "invalid violation kind")
+		return
+	}
+	if err := s.store.RecordViolation(pkg.ExamID, c.ServiceNumber, req.Kind, time.Now()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to record")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recorded": true})
 }
 
 func (s *Server) kioskSubmit(w http.ResponseWriter, r *http.Request, c roster.Candidate) {

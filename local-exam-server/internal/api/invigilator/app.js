@@ -56,13 +56,15 @@
 
   function summary() {
     var counts = { not_checked_in: 0, checked_in: 0, started: 0, submitted: 0 };
-    state.candidates.forEach(function (c) { counts[c.status] = (counts[c.status] || 0) + 1; });
+    var flagged = 0;
+    state.candidates.forEach(function (c) { counts[c.status] = (counts[c.status] || 0) + 1; if (c.violations > 0) flagged++; });
     var stat = function (label, n) { return h('div', { class: 'stat' }, h('b', { text: String(n) }), h('span', { text: label })); };
     return h('div', { class: 'summary' },
       stat('On roster', state.candidates.length),
       stat('Checked in', counts.checked_in + counts.started + counts.submitted),
       stat('In progress', counts.started),
-      stat('Submitted', counts.submitted)
+      stat('Submitted', counts.submitted),
+      stat('Flagged', flagged)
     );
   }
 
@@ -75,15 +77,16 @@
     var table = h('table', {},
       h('thead', {}, h('tr', {},
         h('th', { text: 'Service number' }), h('th', { text: 'Rank' }), h('th', { text: 'Name' }),
-        h('th', { text: 'Status' }), h('th', { text: 'Reference' })
+        h('th', { text: 'Status' }), h('th', { text: 'Reference' }), h('th', { text: 'Flags' })
       )),
       h('tbody', {}, ...rows.map(function (c) {
-        return h('tr', {},
+        return h('tr', { class: c.violations > 0 ? 'flagged' : '' },
           h('td', { text: c.service_number }),
           h('td', { text: c.rank }),
           h('td', { text: c.full_name }),
           h('td', { class: 'status' }, h('span', { class: 'badge ' + c.status, text: STATUS_LABEL[c.status] || c.status })),
-          h('td', { text: c.reference || '—' })
+          h('td', { text: c.reference || '—' }),
+          h('td', {}, c.violations > 0 ? h('span', { class: 'flag-count', title: 'Left the exam screen or fullscreen ' + c.violations + ' time(s)' }, String(c.violations)) : h('span', { class: 'muted-cell', text: '—' }))
         );
       }))
     );

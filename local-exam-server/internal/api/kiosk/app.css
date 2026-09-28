@@ -75,6 +75,8 @@ button { font: inherit; }
 .banner.low { background: var(--caution-soft); color: var(--caution); }
 .banner.crit { background: var(--rejected-soft); color: var(--rejected); }
 .banner.off { background: var(--bank-soft); color: var(--bank); font-weight: 600; }
+.banner.watch { background: var(--rejected-soft); color: var(--rejected); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.banner.watch .btn { flex-shrink: 0; height: 36px; padding: 0 14px; }
 
 .screen { display: flex; flex-direction: column; height: 100%; }
 .page { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; padding: 32px 48px; }

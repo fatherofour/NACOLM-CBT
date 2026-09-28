@@ -58,6 +58,7 @@ type candidateStatus struct {
 	FullName      string `json:"full_name"`
 	Status        string `json:"status"` // "not_checked_in" | "checked_in" | "started" | "submitted"
 	Reference     string `json:"reference,omitempty"`
+	Violations    int    `json:"violations"` // tab hidden / window blur / left fullscreen — see kioskViolation
 }
 
 // invigilatorCandidates lists every roster candidate with their current
@@ -74,10 +75,16 @@ func (s *Server) invigilatorCandidates(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"candidates": []candidateStatus{}})
 		return
 	}
+	violations, err := s.store.CountViolationsByExam(pkg.ExamID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load violation counts: "+err.Error())
+		return
+	}
+
 	all := rs.All()
 	out := make([]candidateStatus, len(all))
 	for i, c := range all {
-		out[i] = candidateStatus{ServiceNumber: c.ServiceNumber, Rank: c.Rank, FullName: c.FullName, Status: "not_checked_in"}
+		out[i] = candidateStatus{ServiceNumber: c.ServiceNumber, Rank: c.Rank, FullName: c.FullName, Status: "not_checked_in", Violations: violations[c.ServiceNumber]}
 		st, err := s.store.GetSessionState(pkg.ExamID, c.ServiceNumber)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load session state: "+err.Error())

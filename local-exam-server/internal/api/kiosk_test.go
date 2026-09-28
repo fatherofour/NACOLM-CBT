@@ -198,6 +198,39 @@ func TestKioskHeldResultsHideScore(t *testing.T) {
 	}
 }
 
+func TestKioskViolationReporting(t *testing.T) {
+	c, key := setup(t, "immediate")
+
+	if code, _ := c.do("POST", "/kiosk/api/violation", map[string]string{"kind": "tab_hidden"}); code != http.StatusUnauthorized {
+		t.Fatalf("violation before sign-in: want 401, got %d", code)
+	}
+
+	c.do("POST", "/kiosk/api/login", map[string]string{"service_number": "NA/1", "pin": "123456"})
+	c.do("POST", "/release", map[string]string{"key_hex": key})
+	c.do("POST", "/kiosk/api/start", nil)
+
+	if code, _ := c.do("POST", "/kiosk/api/violation", map[string]string{"kind": "not_a_real_kind"}); code != http.StatusBadRequest {
+		t.Fatalf("unknown violation kind: want 400, got %d", code)
+	}
+	for _, kind := range []string{"tab_hidden", "window_blur", "fullscreen_exit"} {
+		if code, res := c.do("POST", "/kiosk/api/violation", map[string]string{"kind": kind}); code != http.StatusOK || res["recorded"] != true {
+			t.Fatalf("violation %q: want 200/recorded, got %d %v", kind, code, res)
+		}
+	}
+
+	code, res := c.do("GET", "/invigilator/api/candidates", nil)
+	if code != http.StatusOK {
+		t.Fatalf("invigilator candidates: got %d", code)
+	}
+	cands := res["candidates"].([]any)
+	if len(cands) != 1 {
+		t.Fatalf("want 1 candidate, got %d", len(cands))
+	}
+	if n := cands[0].(map[string]any)["violations"].(float64); n != 3 {
+		t.Fatalf("want 3 violations surfaced to the invigilator, got %v", n)
+	}
+}
+
 func TestKioskServesPage(t *testing.T) {
 	c, _ := setup(t, "immediate")
 	res, err := c.c.Get(c.url + "/kiosk/")

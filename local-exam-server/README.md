@@ -96,8 +96,26 @@ chromium --kiosk "http://<exam-server>:8080/kiosk/?seat=A-14"
   `publish_mode: immediate` the candidate sees their objective score;
   otherwise they're told results come from the instructor.
 - The paper sent to the kiosk never includes correct answers or model
-  answers. The page sends a strict Content-Security-Policy and blocks
-  right-click, copy and paste during the exam.
+  answers.
+- **Browser lockdown controls**, honestly scoped — a web page can detect and
+  discourage, but never truly *prevent*, someone switching tabs or closing a
+  window; there's no browser API for that. True lockdown needs a native
+  kiosk browser or OS-level tooling, which is out of scope here. What the
+  kiosk actually does:
+  - Blocks right-click, copy, cut, paste and drag-drop during the exam, and
+    sends a strict Content-Security-Policy.
+  - Requests full-screen when the candidate presses Start, and shows a
+    "return to full screen" prompt (with a reminder that it's recorded) if
+    they leave it.
+  - `beforeunload` triggers the browser's own native "leave this page?"
+    confirmation if the candidate tries to close or navigate away.
+  - Detects the tab being hidden or the window losing focus and reports it
+    to the server as it happens.
+  - Every one of those detections is logged per candidate
+    (`POST /kiosk/api/violation`, `internal/store/violations.go`) and shown
+    as a **Flags** count on the invigilator console's roster table — the
+    point isn't to silently collect evidence, it's to put an actionable
+    signal in front of the person actually in the room.
 
 ### Roster CSV
 

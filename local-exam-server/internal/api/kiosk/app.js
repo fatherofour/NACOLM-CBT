@@ -72,6 +72,7 @@
     cur: 0, deadline: null, offset: 0, confirming: false, result: null,
     online: true, loginError: '', agreed: false, starting: false, submitting: false,
     lastSavedAt: 0, dirty: false, autoSubmitted: false, signOutAt: 0,
+    violations: 0, lastViolationAt: 0, notFullscreen: false,
   };
   const qKey = () => 'nacolm-queue:' + (S.me?.candidate?.service_number || '');
   const fKey = () => 'nacolm-flags:' + (S.me?.candidate?.service_number || '');
@@ -326,7 +327,19 @@
       left <= 120 ? h('div', { class: 'banner crit', role: 'alert', text: 'Less than 2 minutes left. Your answers will be submitted automatically at 00:00.' })
         : left <= 600 ? h('div', { class: 'banner low', role: 'alert', text: 'Less than 10 minutes left. Check any flagged or unanswered questions.' }) : null,
       !S.online ? h('div', { class: 'banner off', role: 'status', text: 'The connection to the exam server dropped. Keep going: your answers are saved on this computer and will send when it’s back.' }) : null,
+      S.notFullscreen
+        ? h('div', { class: 'banner watch', role: 'alert' },
+          h('span', { text: 'You’ve left full-screen mode. This is recorded and visible to the invigilator.' }),
+          h('button', { class: 'btn', onclick: enterFullscreen }, 'Return to full screen'))
+        : null,
+      S.violations > 0 && Date.now() - S.lastViolationAt < 6000
+        ? h('div', { class: 'banner watch', role: 'alert', text: 'You left this screen (switched tab or window). This has been recorded — warning ' + S.violations + '.' })
+        : null,
     ];
+  }
+  function enterFullscreen() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
   }
   function theoryBox(q, ans) {
     const text = ans.answer_text || '';
@@ -443,6 +456,7 @@
     if (d.session.submitted_at) { S.result = await api('POST', '/submit'); finish(false); return; }
     S.view = 'exam';
     S.starting = false;
+    enterFullscreen(); // best-effort: needs the user gesture from the Start button click, which this is
     render();
     flush();
   }
@@ -504,9 +518,32 @@
   window.addEventListener('online', () => flush());
 
   // ---- kiosk guards ----
+  // A web page can never truly stop someone switching tabs, alt-tabbing, or
+  // closing the window the way a native lockdown browser can — there's no
+  // API for it. What it can do: make leaving inconvenient (fullscreen,
+  // beforeunload's native "are you sure?"), block the easy paths for
+  // copying content out (context menu, clipboard events), and — the part
+  // that actually matters for integrity — detect and record every one of
+  // these so the invigilator, physically in the room, sees it happen.
+  function inExam() { return S.view === 'exam' || S.view === 'review'; }
+  function reportViolation(kind) {
+    if (!inExam()) return;
+    S.violations++;
+    S.lastViolationAt = Date.now();
+    api('POST', '/violation', { kind }).catch(() => {}); // best-effort: never blocks the candidate
+    render();
+    setTimeout(() => { if (Date.now() - S.lastViolationAt >= 6000) render(); }, 6100);
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) reportViolation('tab_hidden'); });
+  window.addEventListener('blur', () => { if (!document.hidden) reportViolation('window_blur'); });
+  document.addEventListener('fullscreenchange', () => {
+    const fs = !!document.fullscreenElement;
+    if (inExam() && !fs && !S.notFullscreen) { S.notFullscreen = true; reportViolation('fullscreen_exit'); }
+    else if (fs && S.notFullscreen) { S.notFullscreen = false; render(); }
+  });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
-  for (const ev of ['copy', 'cut', 'paste', 'drop']) document.addEventListener(ev, (e) => { if (S.view === 'exam' || S.view === 'review') e.preventDefault(); });
-  window.addEventListener('beforeunload', (e) => { if (S.view === 'exam' || S.view === 'review') { e.preventDefault(); e.returnValue = ''; } });
+  for (const ev of ['copy', 'cut', 'paste', 'drop']) document.addEventListener(ev, (e) => { if (inExam()) e.preventDefault(); });
+  window.addEventListener('beforeunload', (e) => { if (inExam()) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('keydown', (e) => {
     if (S.view !== 'exam' || S.confirming) {
       if (e.key === 'Escape' && S.confirming) { S.confirming = false; render(); }
