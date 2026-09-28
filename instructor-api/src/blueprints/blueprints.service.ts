@@ -4,6 +4,7 @@ import { AiGenerationService } from '../ai-generation/ai-generation.service.js';
 import { CreateBlueprintDto } from './dto/create-blueprint.dto.js';
 import { allocateByWeight, allocateEvenly } from './allocation.js';
 import { isNearDuplicate } from './duplicate-detection.js';
+import { shuffle } from './shuffle.js';
 import type { QuestionType } from '../generated/prisma/enums.js';
 
 export interface Shortfall {
@@ -168,7 +169,12 @@ export class BlueprintsService {
       const pastNeeded =
         params.sourceMode === 'past_only' ? params.needed : Math.round(params.needed * params.pastQuestionRatio);
 
-      const pastAvailable = await this.prisma.questionBankItem.findMany({
+      // No orderBy here deliberately — with `take` alone, Postgres has no
+      // reason not to return the same rows in the same order every time
+      // (in practice, database order), so every generate() picked the exact
+      // same questions. Fetch the whole matching pool and pick a random
+      // sample of it instead.
+      const pastPool = await this.prisma.questionBankItem.findMany({
         where: {
           sessionId: params.sessionId,
           topic: params.topic,
@@ -176,8 +182,8 @@ export class BlueprintsService {
           source: 'PAST_PAPER',
           status: { in: ['DRAFT', 'APPROVED'] },
         },
-        take: pastNeeded,
       });
+      const pastAvailable = shuffle(pastPool).slice(0, pastNeeded);
       found += pastAvailable.length;
 
       // Still short: copy vetted past-paper questions from the years the
@@ -186,7 +192,13 @@ export class BlueprintsService {
       // question's marking scheme comes with it, marked "reused from bank".
       const otherSessions = params.pastSessionIds.filter((id) => id !== params.sessionId);
       if (found < pastNeeded && otherSessions.length) {
-        const candidates = await this.prisma.questionBankItem.findMany({
+        // Was `orderBy: createdAt desc` — always the most recently uploaded
+        // year/paper first, so picking "multiple past papers" never
+        // actually mixed them: whichever was uploaded last filled the
+        // whole quota before an older one was touched. Shuffle instead, so
+        // every generate() draws a fresh, fairly-mixed sample across all of
+        // the years/papers the instructor selected.
+        const candidatePool = await this.prisma.questionBankItem.findMany({
           where: {
             sessionId: { in: otherSessions },
             topic: params.topic,
@@ -195,8 +207,8 @@ export class BlueprintsService {
             status: 'APPROVED',
           },
           include: { markingScheme: { include: { conceptGroups: true } } },
-          orderBy: { createdAt: 'desc' },
         });
+        const candidates = shuffle(candidatePool);
         for (const item of candidates) {
           if (found >= pastNeeded) break;
           if (isNearDuplicate(item.body, params.existingBodies)) {
