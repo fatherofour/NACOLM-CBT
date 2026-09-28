@@ -4,7 +4,15 @@ import { AuthService, SESSION_COOKIE, readCookie } from './auth.service.js';
 import { CurrentUser, Public, type SessionUser } from './decorators.js';
 import { LoginDto } from './dto/login.dto.js';
 
-const secureCookies = () => process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production';
+// Defaults to secure in production (so forgetting to set this is a safe
+// failure), but an explicit COOKIE_SECURE always wins either way — needed
+// for a production deployment still running on plain HTTP before TLS is in
+// front of it, where a Secure cookie would silently never get sent back.
+function secureCookies(): boolean {
+  if (process.env.COOKIE_SECURE === 'true') return true;
+  if (process.env.COOKIE_SECURE === 'false') return false;
+  return process.env.NODE_ENV === 'production';
+}
 
 @Controller('auth')
 export class AuthController {
