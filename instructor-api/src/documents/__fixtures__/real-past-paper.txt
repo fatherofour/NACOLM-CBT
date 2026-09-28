@@ -1,0 +1,309 @@
+DEPARTMENT OF LOGISTICS & SUPPLY CHAIN
+MANAGEMENT
+Course Assessment: Logistics & Movement Control (LMC-301)
+Time Allowed: 2 Hours 30
+Mins
+Total Marks: 100 Marks
+Questions: 70 Total
+INSTRUCTIONS: Answer all questions. Section A (MCQs: 1–35), Section B (True/False: 36–50), Section C (Fill-in: 51–60),
+Section D (Short Answer/Calculations: 61–70).
+SECTION A: MULTIPLE CHOICE QUESTIONS (QUESTIONS 1 – 20)
+1. Which authority is primarily responsible for coordinating and
+scheduling movement through a transportation network?
+A) Traffic Management Office
+B) Movement Control Center (MCC)
+C) Quartermaster Depot
+D) Central Dispatch Agency
+2. Maximum capacity of a route, port, or terminal expressed in
+tons or vehicles per day is:
+A) Backlog
+B) Throughput
+C) Tare weight
+D) Dwell time
+3. The ratio of cargo payload weight relative to total vehicle
+capacity is known as:
+A) Load factor
+B) Cube-out
+C) Gross vehicle weight
+D) Axle load index
+4. When cargo fills volumetric capacity before reaching weight
+limits, the load has:
+A) Weighed-out
+B) Cubed-out
+C) Staged-out
+D) Maxed-out
+5. Which mode offers highest speed but lowest volume
+capacity per single transport unit?
+A) Maritime
+B) Rail
+C) Air transport
+D) Inland waterway
+6. Primary contract of carriage and receipt of goods between
+shipper and carrier:
+A) Movement Order
+B) Bill of Lading (BOL)
+C) Manifest
+D) Shipping Label
+7. Time spent by cargo/vehicles waiting at a terminal before
+departing or unloading:
+A) Lead time
+B) Cycle time
+C) Dwell time
+D) Transit time
+8. Distance maintained between individual vehicles in a convoy
+column:
+A) Column length
+B) Vehicle interval
+C) Time gap
+D) March unit
+9. Moving cargo directly from inbound to outbound transport
+with minimal storage:
+A) Drop-shipping
+B) Cross-docking
+C) Transshipment
+D) Reverse logistics
+10. A "March Unit" in military or heavy civil convoy planning
+typically consists of:
+A) 1 to 2 vehicles
+B) 5 to 20 vehicles
+C) 50 to 100 vehicles
+D) Over 200 vehicles
+11. The primary objective of Movement Control is to:
+A) Minimize fuel consumption
+B) Balance requirements against capabilities
+C) Enforce speed limits
+D) Inspect cargo for duties
+12. Intermodal transportation is best defined as:
+A) Single mode across multiple countries
+B) Cargo unit moved via multiple modes without handling
+cargo itself
+C) Switching cargo manually between trucks
+D) Air passenger luggage handling
+13. Document detailing complete contents, passengers, or
+freight carried on a vessel/trip:
+A) Waybill
+B) Manifest
+C) Purchase Order
+D) Tally sheet
+14. Total transit time calculation formula:
+A) Travel Time + Dwell Time + Processing Time
+B) Distance ÷ Speed Limit
+C) Total Tonnage ÷ Vehicle Count
+D) Loading Time × Number of Stops
+15. Which hazardous material class covers flammable liquids?
+A) Class 1
+B) Class 2
+C) Class 3
+D) Class 8
+16. What is the role of a Marshalling Yard in staging
+operations?
+A) Tire maintenance bay
+B) Location to organize/hold vehicles/cargo prior to move
+C) Retail outlet
+D) Customs admin office
+17. In containerized ocean shipping, "TEU" stands for: 	18. Primary factor in determining route classification for heavy
+Course Code: LMC-301 | Logistics & Movement Control 	Page 1 of 5
+
+-- 1 of 5 --
+
+SECTION A: MULTIPLE CHOICE QUESTIONS (CONTINUED: 21 – 35)
+21. Official authorization to use a specific route at a designated
+time:
+A) Movement Clearance
+B) Customs Entry
+C) Freight Audit
+D) Route Reconnaissance
+22. Fee charged for detaining a transport asset beyond allowed
+free time:
+A) Demurrage
+B) Rebate
+C) Indemnity
+D) Fuel surcharge
+23. Movement priority assigned to life-saving medical supplies
+or critical resupply:
+A) Priority 1 (Immediate)
+B) Priority 3 (Routine)
+C) Priority 4 (Deferred)
+D) Low Priority
+24. In convoy operations, "catch-up speed" refers to:
+A) Maximum legal highway limit
+B) Speed used by lagging vehicles to regain position
+C) Speed of slowest vehicle
+D) Urban intersection speed
+25. A "Chokepoint" in movement control is defined as:
+A) Designated rest stop
+B) Geographic/structural feature restricting traffic flow
+C) Vehicle engine failure
+D) Open express highway
+26. Which of the following is an In-Transit Visibility (ITV)
+technology?
+A) Paper ledger
+B) Active RFID tags & GPS tracking
+C) Paper waybill
+D) Odometer log
+27. "Tare Weight" refers to:
+A) Weight of cargo only
+B) Unladen weight of empty vehicle/container
+C) Total combined weight
+D) Axle limit of bridge
+28. The vertical space available beneath a bridge or overhead
+structure:
+A) Lateral clearance
+B) Overhead (vertical) clearance
+C) Axle spacing
+D) Turning envelope
+29. What is the primary purpose of a Movement Table?
+A) Calculate driver payroll
+B) Schedule vehicle departures, arrivals, & passage points
+C) Track fuel rates
+D) Record warehouse bins
+30. Cargo that reaches allowable weight limit before filling
+container volume has:
+A) Cubed-out
+B) Weighed-out
+C) Staged-out
+D) Maxed-out
+31. Required document for international cargo to declare
+goods to customs:
+A) Internal Slip
+B) Customs Entry Declaration
+C) Driver Logbook
+D) Packing Note
+32. In traffic management, a "Passage Point" (PP) is used to:
+A) Monitor and log passing units along a route
+B) Store extra fuel
+C) Park broken trucks
+D) Issue customs taxes
+33. "Reverse Logistics" primarily deals with:
+A) Driving vehicles backwards
+B) Backward flow of goods for returns, repair, or disposal
+C) Night-time scheduling
+D) Fuel recycling
+34. Standard width of a standard ISO intermodal shipping
+container:
+A) 6 feet
+B) 8 feet
+C) 10 feet
+D) 12 feet
+35. Agency responsible for enforcing route rules & convoy
+security:
+A) Port Authority
+B) Military Police / Traffic Control Unit
+C) Customs Bureau
+D) Freight Registry
+SECTION B: TRUE OR FALSE QUESTIONS (QUESTIONS 36 – 50)
+36. Movement Control applies exclusively to military operations.
+[ T / F ]
+37. Gross Vehicle Weight includes vehicle, fuel, driver, and
+cargo. [ T / F ]
+38. Dwell time should be maximized to increase transport
+efficiency. [ T / F ]
+39. Active RFID tags require manual barcode scans at 2-inch
+ranges. [ T / F ]
+40. A convoy commander must always travel at the tail of a
+column. [ T / F ]
+41. Cross-docking reduces warehouse storage needs. [ T / F ]
+Course Code: LMC-301 | Logistics & Movement Control 	Page 2 of 5
+
+-- 2 of 5 --
+
+SECTION C: FILL-IN-THE-BLANK QUESTIONS (QUESTIONS 51 – 60)
+51. Total weight of vehicle, fuel, driver, and cargo is
+____________________.
+52. Tracking goods from origin to destination is
+____________________ (ITV).
+53. A 40-foot standard ISO shipping container equals
+____________________ TEU(s).
+54. Maximum legal weight permitted on a single vehicle axle is
+____________________ limit.
+55. Location along a route where control personnel log passing
+trucks is a ____________________.
+56. Facility where cargo transfers between transport modes is
+an ____________________ terminal.
+57. In dangerous goods regulation, HAZMAT Class 1 designates
+____________________.
+58. Gross Vehicle Weight minus Tare Weight equals
+____________________ weight.
+59. Standard operating speed of a convoy on open highways is
+____________________ speed.
+60. Document detailing route timelines, PPs, and arrival
+schedules is Movement ____________________.
+SECTION D: SHORT ANSWER & CALCULATION QUESTIONS (QUESTIONS 61 – 64)
+Question 61: Definition & Functions of Movement Control (6 Marks)
+Define Movement Control in modern logistics management and briefly outline its three core operational functions.
+Question 62: Port Throughput Capacity Calculation (6 Marks)
+A seaport terminal operates N = 2 gantry cranes for T = 10\text{ hours/day} . Each crane unloads an average of
+R = 12\text{ containers/hour} . Calculate the total daily throughput capacity of the terminal in containers. Show your step-by-
+step formula.
+Question 63: Payload Capacity & Unit Load Calculation (8 Marks)
+A heavy haulage truck has a Tare Weight of W_{tare} = 8,500\text{ kg} and a Gross Vehicle Weight Rating (GVWR) of
+W_{gvw} = 24,000\text{ kg} . The cargo consists of uniform palletized goods weighing w_{pallet} = 750\text{ kg} per unit.
+(a) Calculate the maximum legal payload capacity ( W_{payload} ) of the vehicle.
+(b) Determine the maximum number of complete pallets the truck can legally transport without overloading.
+Question 64: Trade-off Analysis: Weighing-Out vs. Cubing-Out (6 Marks)
+Explain the physical distinction between a vehicle "Weighing-Out" versus "Cubing-Out". Provide one distinct cargo material
+example for each case.
+Course Code: LMC-301 | Logistics & Movement Control 	Page 3 of 5
+
+-- 3 of 5 --
+
+SECTION D: SHORT ANSWER & CALCULATION QUESTIONS (CONTINUED: 65 – 70)
+Question 65: Convoy Column Organizational Structure (6 Marks)
+Describe the primary tactical duties of the three core elements of a convoy column: (1) Head, (2) Main Body, and (3) Trail
+(Sweep).
+Question 66: In-Transit Visibility (ITV) Systems (6 Marks)
+Identify two specific automatic identification/data capture (AIDC) technologies used to maintain In-Transit Visibility. Briefly
+state how each improves real-time movement monitoring.
+Question 67: Bottleneck & Network Capacity Analysis (8 Marks)
+A multi-modal freight transport corridor comprises three sequential segments:
+Leg A (Warehouse Loading Rate): 150\text{ tons/hour}
+Leg B (Bridge Weight Restriction): 60\text{ tons/hour}
+Leg C (Receiving Terminal Discharge): 100\text{ tons/hour}
+(a) Determine the overall maximum operational throughput of the entire supply route.
+(b) Identify the network bottleneck and propose two managerial interventions a Movement Control Officer can implement to
+mitigate this constraint.
+Question 68: Intermodal vs. Multimodal Contracting (6 Marks)
+Compare Intermodal Transport and Multimodal Transport. What is the fundamental legal and contractual difference regarding
+carrier liability?
+Question 69: Hazardous Material Movement Clearance (6 Marks)
+List four essential compliance items or safety documentations that must be verified prior to issuing a movement clearance for
+a road convoy transporting Class 3 Flammable Liquids.
+Question 70: Total Transit Time & ETA Calculation (8 Marks)
+A supply truck must complete a D = 300\text{ km} movement at a planned average cruising speed of V = 60\text{ km/h} . The
+route plan mandates two mandatory driver rest halts of 30 minutes each and a 1-hour delay for border clearance.
+Calculate the total transit time ( T_{total} ) from departure to arrival. Show full working.
+Course Code: LMC-301 | Logistics & Movement Control 	Page 4 of 5
+
+-- 4 of 5 --
+
+OFFICIAL ANSWER KEY & MARKING SCHEME
+SECTION A: MULTIPLE CHOICE ANSWERS (Questions 1 – 35)
+1 	2 	3 	4 	5 	6 	7 	8 	9 10 11 12 13 14 15 16 17
+B 	B 	A 	B 	C 	B 	C 	B 	B 	B 	B 	B 	B 	A 	C 	B 	B
+18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35
+B 	A 	C 	A 	A 	A 	B 	B 	B 	B 	B 	B 	B 	B 	A 	B 	B 	B
+SECTION B: TRUE / FALSE ANSWERS (Questions 36 – 50)
+36 	37 	38 	39 	40 	41 	42 	43 	44 	45 	46 	47 	48 	49 	50
+F 	T 	F 	F 	F 	T 	F 	T 	T 	T 	T 	F 	T 	T 	F
+SECTION C: FILL-IN-THE-BLANK ANSWERS (Questions 51 – 60)
+51: Gross Vehicle Weight (GVW) 	52: In-Transit Visibility
+53: 2 (Two) 	54: Axle Load
+55: Control / Passage Point 	56: Intermodal / Transshipment
+57: Explosives 	58: Payload (Net Weight)
+59: March / Cruise 	60: Schedule / Table
+SECTION D: WORKED SOLUTIONS (Questions 61 – 70 Highlights)
+Q62 Solution: $\text{Throughput} = N \times R \times T = 2 \text{ cranes} \times 12 \text{ cont/hr} \times 10 \text{ hrs} = \mathbf{240\text{
+containers/day}}$.
+Q63 Solution:
+(a) $\text{Payload} = W_{gvw} - W_{tare} = 24,000\text{ kg} - 8,500\text{ kg} = \mathbf{15,500\text{ kg}}$.
+(b) $\text{Pallets} = \lfloor 15,500 / 750 \rfloor = \lfloor 20.66 \rfloor = \mathbf{20\text{ pallets}}$.
+Q67 Solution: (a) System capacity = minimum leg rate = $\mathbf{60\text{ tons/hour}}$. (b) Leg B is the bottleneck. Mitigation: Reroute
+heavy loads over alternative routes, stage cargo, or employ temporary heavy bridging structures.
+Q70 Solution:
+$\text{Driving Time} = 300\text{ km} / 60\text{ km/h} = 5.0\text{ hours}$.
+$\text{Delays} = (2 \times 30\text{ mins}) + 60\text{ mins} = 2.0\text{ hours}$.
+$\text{Total Transit Time} = 5.0 + 2.0 = \mathbf{7.0\text{ hours}}$.
+Course Code: LMC-301 | Logistics & Movement Control 	Page 5 of 5
+
+-- 5 of 5 --
+

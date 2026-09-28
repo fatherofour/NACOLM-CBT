@@ -1,12 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
 const slug = (s: string) => s.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unnamed';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AiGenerationService } from '../ai-generation/ai-generation.service.js';
 import type { DocumentType } from '../generated/prisma/enums.js';
+import { extractText } from './extract-text.js';
+import { parsePastPaperText } from './past-paper-parser.js';
 
 const STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT ?? './data/documents';
 
@@ -67,7 +69,62 @@ export class DocumentsService {
       }
     }
 
+    // Best-effort, same as study material's central-api registration above:
+    // a past paper that fails to parse (e.g. a scanned, image-only PDF with
+    // no text layer) still gets stored — the instructor just adds questions
+    // to the bank by hand for that one, same as before this existed.
+    if (docType === 'PAST_PAPER') {
+      try {
+        const extracted = await this.extractPastPaperQuestions(document.id);
+        return { ...document, extractedQuestions: extracted.created };
+      } catch (err) {
+        this.logger.error(`failed to extract questions from ${document.id}: ${String(err)}`);
+      }
+    }
+
     return document;
+  }
+
+  /**
+   * Deterministic (no AI) extraction of individual questions from an
+   * uploaded past paper — see past-paper-parser.ts for how. Every question
+   * lands as a DRAFT, same as an AI-drafted one, so nothing reaches a paper
+   * without going through the normal review/approve flow; a two-column
+   * layout or unusual format just means a lower-quality draft to review or
+   * reject, never a silent wrong answer sneaking onto a real exam.
+   */
+  async extractPastPaperQuestions(documentId: string) {
+    const doc = await this.prisma.sourceDocument.findUniqueOrThrow({ where: { id: documentId } });
+    const buffer = await readFile(doc.storagePath);
+    const text = await extractText(buffer, doc.storagePath);
+    const parsed = parsePastPaperText(text);
+
+    for (const q of parsed) {
+      await this.prisma.questionBankItem.create({
+        data: {
+          sessionId: doc.sessionId,
+          topic: 'Uncategorized',
+          type: q.type,
+          source: 'PAST_PAPER',
+          status: 'DRAFT',
+          body: q.body,
+          options: q.options,
+          correctIndex: q.correctIndex,
+          citation: `${doc.title}, question ${q.sourceNumber}`,
+          markingScheme: q.markingScheme
+            ? {
+                create: {
+                  totalMarks: q.markingScheme.reduce((sum, g) => sum + g.marks, 0),
+                  conceptGroups: {
+                    create: q.markingScheme.map((g, i) => ({ canonicalTerm: g.canonicalTerm, marks: g.marks, required: true, order: i })),
+                  },
+                },
+              }
+            : undefined,
+        },
+      });
+    }
+    return { created: parsed.length };
   }
 
   list(filter: { sessionId?: string; courseId?: string; docType?: DocumentType }) {

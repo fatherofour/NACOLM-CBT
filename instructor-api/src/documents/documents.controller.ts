@@ -54,4 +54,12 @@ export class DocumentsController {
   remove(@Param('id') id: string) {
     return this.documents.delete(id);
   }
+
+  // Upload already runs this automatically for a past paper — this is for
+  // re-running it by hand (e.g. after the automatic pass failed, or to redo
+  // it having deleted the draft items it made the first time).
+  @Post(':id/extract-questions')
+  extractQuestions(@Param('id') id: string) {
+    return this.documents.extractPastPaperQuestions(id);
+  }
 }

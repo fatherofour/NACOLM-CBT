@@ -52,6 +52,7 @@ export function LibraryPage({ kind }: { kind: Kind }) {
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState<SourceDocument | null>(null);
   const [delError, setDelError] = useState('');
+  const [extractSummary, setExtractSummary] = useState<number | null>(null);
 
   async function remove(d: SourceDocument) {
     setDelError('');
@@ -76,6 +77,17 @@ export function LibraryPage({ kind }: { kind: Kind }) {
         }
       />
       {courses.error ? <Alert tone="error" title="Couldn’t load courses">{courses.error}</Alert> : null}
+      {extractSummary != null ? (
+        <Alert
+          tone={extractSummary > 0 ? 'info' : 'caution'}
+          title={extractSummary > 0 ? `${extractSummary} question${extractSummary === 1 ? '' : 's'} extracted` : 'No questions could be extracted'}
+          action={<Button variant="quiet" onClick={() => setExtractSummary(null)}>Dismiss</Button>}
+        >
+          {extractSummary > 0
+            ? 'Added to the bank as drafts, tagged with this paper and their original question number. Review and approve them from the session’s Review page before they count as available.'
+            : 'This usually means the PDF has no text layer (a scanned image) or an unusual layout. Add its questions to the bank by hand instead.'}
+        </Alert>
+      ) : null}
       {courses.data && !courses.data.length ? (
         <EmptyState
           title="No courses yet"
@@ -90,11 +102,12 @@ export function LibraryPage({ kind }: { kind: Kind }) {
           courses={courses.data}
           initialCourseId={courseId}
           onClose={() => setOpen(false)}
-          onUploaded={async (cid) => {
+          onUploaded={async (cid, extractedQuestions) => {
             setOpen(false);
             await courses.reload();
             setCourseId(cid);
             await docs.reload();
+            if (extractedQuestions != null) setExtractSummary(extractedQuestions);
           }}
         />
       ) : null}
@@ -122,7 +135,7 @@ export function LibraryPage({ kind }: { kind: Kind }) {
                   </span>
                 ))}
               </div>
-              <p className="m-0 text-[13px] text-ink-muted">Questions from an uploaded paper join the bank once they’ve been entered and approved; uploading stores the paper itself.</p>
+              <p className="m-0 text-[13px] text-ink-muted">Uploading a paper automatically extracts its questions into the bank as drafts — review and approve them before they count as available here.</p>
             </Panel>
           ) : null}
 
@@ -198,7 +211,7 @@ function DocStatus({ d }: { d: SourceDocument }) {
   return d.centralApiDocumentId ? <Chip tone="approved">Ready for drafting</Chip> : <Chip tone="caution">Not indexed yet</Chip>;
 }
 
-function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { kind: Kind; courses: Course[]; initialCourseId: string; onClose: () => void; onUploaded: (courseId: string) => void }) {
+function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { kind: Kind; courses: Course[]; initialCourseId: string; onClose: () => void; onUploaded: (courseId: string, extractedQuestions?: number) => void }) {
   const t = COPY[kind];
   const [courseId, setCourseId] = useState(initialCourseId || courses[0]?.id || '');
   const course = courses.find((c) => c.id === courseId);
@@ -240,8 +253,8 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
       form.set('sessionId', sid);
       form.set('docType', kind);
       form.set('title', title.trim());
-      await api.upload('/documents', form);
-      onUploaded(course.id);
+      const uploaded = await api.upload<{ extractedQuestions?: number }>('/documents', form);
+      onUploaded(course.id, kind === 'PAST_PAPER' ? uploaded.extractedQuestions : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.');
     } finally {
