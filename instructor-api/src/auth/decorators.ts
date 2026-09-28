@@ -24,7 +24,7 @@ export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionC
   return ctx.switchToHttp().getRequest().user;
 });
 
-/** How a user is named in audit logs and on frozen papers. */
+/** How a user is named in audit logs and on published papers. */
 export function actorName(user: SessionUser): string {
   return `${user.rank} ${user.fullName} (${user.serviceNumber})`;
 }

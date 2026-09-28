@@ -76,7 +76,7 @@ export interface CoverageRow {
   topic: string; target: number; approved: number; pending: number; rejected: number;
   byDifficulty: { easy: number; medium: number; hard: number }; gap: number;
 }
-export interface PaperVersion { id: string; versionNumber: number; frozenAt: string; frozenBy: string; signatureHash: string; items: unknown[] }
+export interface PaperVersion { id: string; versionNumber: number; examDate: string; publishedAt: string; publishedBy: string; signatureHash: string; items: unknown[] }
 export interface Paper { id: string; sessionId: string; title: string; versions: PaperVersion[] }
 export interface MarkResult {
   score: number; maxScore: number; matchedGroups: string[]; missingGroups: string[];

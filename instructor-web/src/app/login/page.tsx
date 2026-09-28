@@ -29,7 +29,7 @@ export default function LoginPage() {
           <h1 className="m-0 text-[28px] font-[750] leading-8 tracking-[-0.01em] lg:text-[44px] lg:leading-[48px]" style={{ fontStretch: '88%' }}>
             NACOLM CBT
           </h1>
-          <p className="m-0 text-sm text-on-command-muted lg:text-[15px]">Set, review and freeze exam papers you can defend.</p>
+          <p className="m-0 text-sm text-on-command-muted lg:text-[15px]">Set, review and publish exam papers you can defend.</p>
         </div>
         <div className="mt-2 hidden items-center gap-3 lg:absolute lg:bottom-8 lg:flex">
           <Image src="/brand/nigerian-army.png" alt="Nigerian Army emblem" width={400} height={303} className="h-10 w-auto" />

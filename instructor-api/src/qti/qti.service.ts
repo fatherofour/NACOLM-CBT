@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service.js';
 import { zipStore, type ZipEntry } from './qti-zip.js';
 
-// Exports a frozen paper as an IMS QTI 2.1 content package — the standard
+// Exports a published paper as an IMS QTI 2.1 content package — the standard
 // interchange format for assessment items, so a future custom-built LMS (or
 // any existing one) can import NACOLM's questions without a bespoke
 // adapter. Deliberately scoped to what QTI actually represents well:

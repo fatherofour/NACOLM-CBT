@@ -10,7 +10,7 @@ interface BridgeResponse {
   pool_size: number;
 }
 
-// Builds the encrypted question package for a frozen paper. The candidate
+// Builds the encrypted question package for a published paper. The candidate
 // roster travels to the venue separately, as a plain CSV
 // (service_number,rank,full_name,pin) local-exam-server loads from disk —
 // downloaded from the Candidates screen at creation/import/reset time (a

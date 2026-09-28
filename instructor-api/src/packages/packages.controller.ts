@@ -11,8 +11,8 @@ export class PackagesController {
     return this.packages.get(paperVersionId);
   }
 
-  // Same authority as freeze itself (spec: the exam officer performs the
-  // final freeze) — packaging is the step right after it.
+  // Same authority as publishing itself (spec: the exam officer performs
+  // the final freeze/publish) — packaging is the step right after it.
   @Post(':paperVersionId/build')
   @Roles('EXAM_OFFICER')
   build(@Param('paperVersionId') paperVersionId: string, @CurrentUser() user: SessionUser) {

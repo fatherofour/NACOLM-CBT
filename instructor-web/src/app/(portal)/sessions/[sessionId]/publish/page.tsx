@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { use, useState } from 'react';
 import { Alert, Button, Spinner, WizardSteps } from '@/components/nc/basics';
 import { CoverageTable } from '@/components/nc/coverage';
-import { FreezeConfirm, FreezeReceipt } from '@/components/nc/freeze';
+import { PublishConfirm, PublishReceipt } from '@/components/nc/publish';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { useUser } from '@/components/shell/user-context';
 import { api, qs, type Blueprint, type CoverageRow, type ExamPackage, type Paper, type Question } from '@/lib/api';
@@ -11,8 +11,18 @@ import { sessionInfo } from '@/lib/session-info';
 import { useData } from '@/lib/use-data';
 
 const fmt = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
-export default function FreezePage({ params }: { params: Promise<{ sessionId: string }> }) {
+// Informational only — see the note on PublishConfirm. This never gates
+// anything; it just tells the reader how far away the planned date is.
+function countdown(examDate: string): string {
+  const days = Math.ceil((new Date(examDate + 'T00:00:00').getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
+  if (days === 0) return 'Exam day';
+  if (days > 0) return `${days} day${days === 1 ? '' : 's'} away`;
+  return `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`;
+}
+
+export default function PublishPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const user = useUser();
   const info = useData(() => sessionInfo(sessionId), [sessionId]);
@@ -43,18 +53,18 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
     : theoryNoScheme
       ? `${theoryNoScheme} approved theory question${theoryNoScheme === 1 ? ' has' : 's have'} no marking scheme.`
       : !approved.length
-        ? 'There are no approved questions to freeze.'
+        ? 'There are no approved questions to publish.'
         : '';
 
-  async function freeze() {
+  async function publish(examDate: string) {
     setBusy(true);
     setError('');
     try {
-      await api.post('/papers/freeze', { sessionId, title, confirmationPhrase: title });
+      await api.post('/papers/publish', { sessionId, title, confirmationPhrase: title, examDate });
       setAgain(false);
       await data.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Freezing failed.');
+      setError(e instanceof Error ? e.message : 'Publishing failed.');
     } finally {
       setBusy(false);
     }
@@ -63,12 +73,12 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
   return (
     <>
       <PageHead
-        title="Coverage and freeze"
-        intro="Check the paper against its blueprint, then freeze a signed version for the exam centre."
-        crumbs={[['Exam sessions', '/sessions'], [info.data?.title ?? '…', `/sessions/${sessionId}/review`], ['Freeze']]}
+        title="Coverage and publish"
+        intro="Check the paper against its blueprint, then publish a signed version for the exam centre."
+        crumbs={[['Exam sessions', '/sessions'], [info.data?.title ?? '…', `/sessions/${sessionId}/review`], ['Publish']]}
         action={
           <div className="flex flex-col items-end gap-3 md:w-[520px]">
-            <WizardSteps steps={['Generate', 'Review', 'Coverage', 'Freeze']} current={3} />
+            <WizardSteps steps={['Generate', 'Review', 'Coverage', 'Publish']} current={3} />
             <Link className="btnlink" href={`/sessions/${sessionId}/candidates`}>
               Manage candidates
             </Link>
@@ -83,7 +93,7 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
             <h2 className="t-title m-0">Blueprint coverage</h2>
             {d.coverage.length ? <CoverageTable rows={d.coverage} /> : <p className="m-0 text-ink-muted">No blueprint for this term, so there’s nothing to check coverage against.</p>}
             {gaps.length && !blocked ? (
-              <Alert tone="caution" title="You can freeze with gaps, but they’re part of the record">
+              <Alert tone="caution" title="You can publish with gaps, but they’re part of the record">
                 To close them, go back to <Link href={`/sessions/${sessionId}/review`}>review</Link> and approve more questions in those topics.
               </Alert>
             ) : null}
@@ -96,27 +106,32 @@ export default function FreezePage({ params }: { params: Promise<{ sessionId: st
           </Panel>
 
           <div className="flex shrink-0 flex-col gap-4 xl:w-[540px]">
-            {latest ? <FreezeReceipt version={latest.versionNumber} frozenBy={latest.frozenBy} frozenAt={fmt(latest.frozenAt)} signature={latest.signatureHash} /> : null}
+            {latest ? (
+              <>
+                <Alert tone="info" title={`Exam date: ${fmtDate(latest.examDate)}`}>{countdown(latest.examDate)}</Alert>
+                <PublishReceipt version={latest.versionNumber} examDate={fmtDate(latest.examDate)} publishedBy={latest.publishedBy} publishedAt={fmt(latest.publishedAt)} signature={latest.signatureHash} />
+              </>
+            ) : null}
             {latest ? <PackagePanel paperVersionId={latest.id} isOfficer={isOfficer} /> : null}
-            {error ? <Alert tone="error" title="Couldn’t freeze">{error}</Alert> : null}
+            {error ? <Alert tone="error" title="Couldn’t publish">{error}</Alert> : null}
             {isOfficer && latest && !again ? (
               <div className="flex flex-col items-start gap-2">
-                <p className="m-0 text-sm text-ink-muted">Changed the paper since version {latest.versionNumber}? Freeze a new version; the old one stays on record.</p>
-                <button type="button" className="nc-btn" onClick={() => setAgain(true)}>Freeze a new version…</button>
+                <p className="m-0 text-sm text-ink-muted">Changed the paper since version {latest.versionNumber}? Publish a new version; the old one stays on record.</p>
+                <button type="button" className="nc-btn" onClick={() => setAgain(true)}>Publish a new version…</button>
               </div>
             ) : isOfficer ? (
-              <FreezeConfirm
+              <PublishConfirm
                 paperName={title}
                 phrase={title}
                 nextVersion={(latest?.versionNumber ?? 0) + 1}
-                summary={[['Questions', String(approved.length)], ['Coverage gaps', String(gaps.length)], ['Frozen by', `${user.rank} ${user.fullName}`]]}
+                summary={[['Questions', String(approved.length)], ['Coverage gaps', String(gaps.length)], ['Published by', `${user.rank} ${user.fullName}`]]}
                 blockedReason={blocked || undefined}
                 busy={busy}
-                onFreeze={freeze}
+                onPublish={publish}
               />
             ) : (
-              <Alert tone="info" title="The exam officer freezes the paper">
-                {blocked ? `Before it can be frozen: ${blocked}` : 'This paper is ready. Let the exam officer know it can be frozen.'}
+              <Alert tone="info" title="The exam officer publishes the paper">
+                {blocked ? `Before it can be published: ${blocked}` : 'This paper is ready. Let the exam officer know it can be published.'}
               </Alert>
             )}
           </div>

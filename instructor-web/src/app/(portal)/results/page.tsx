@@ -5,7 +5,7 @@ import { PageHead, Panel } from '@/components/shell/page-head';
 import { api, qs, type Blueprint, type Course, type Paper } from '@/lib/api';
 import { useData } from '@/lib/use-data';
 
-interface FrozenPaper { key: string; label: string; version: number; release: 'instant' | 'hold' }
+interface PublishedPaper { key: string; label: string; version: number; release: 'instant' | 'hold' }
 
 // Submissions reach the portal when exam centres sync after an exam. That
 // sync isn't built yet, so real papers show an empty state; "Preview" shows
@@ -19,9 +19,9 @@ const SAMPLE = [
 ];
 
 export default function ResultsPage() {
-  const papers = useData<FrozenPaper[]>(async () => {
+  const papers = useData<PublishedPaper[]>(async () => {
     const courses = await api.get<Course[]>('/courses');
-    const out: FrozenPaper[] = [];
+    const out: PublishedPaper[] = [];
     for (const c of courses)
       for (const s of c.sessions) {
         const [ps, bps] = await Promise.all([api.get<Paper[]>(`/papers${qs({ sessionId: s.id })}`), api.get<Blueprint[]>(`/blueprints${qs({ sessionId: s.id })}`)]);
@@ -58,11 +58,11 @@ export default function ResultsPage() {
             </Panel>
           ) : null}
           <EmptyState
-            title={papers.data.length ? 'No submissions yet' : 'No frozen papers yet'}
+            title={papers.data.length ? 'No submissions yet' : 'No published papers yet'}
             body={
               papers.data.length
                 ? 'Results appear here after an exam centre syncs its submissions. That sync isn’t connected to the portal yet.'
-                : 'Results belong to frozen papers. Freeze a paper first; its results will appear here after the exam.'
+                : 'Results belong to published papers. Publish a paper first; its results will appear here after the exam.'
             }
             action={<Button onClick={() => setPreview(true)}>Preview this screen with sample data</Button>}
           />

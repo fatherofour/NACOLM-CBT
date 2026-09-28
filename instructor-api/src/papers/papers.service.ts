@@ -1,13 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { FreezePaperDto } from './dto/freeze-paper.dto.js';
+import { PublishPaperDto } from './dto/publish-paper.dto.js';
 
 @Injectable()
 export class PapersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async freeze(dto: FreezePaperDto) {
+  async publish(dto: PublishPaperDto) {
     if (dto.confirmationPhrase.trim().toLowerCase() !== dto.title.trim().toLowerCase()) {
       throw new BadRequestException('confirmationPhrase must match the paper title exactly');
     }
@@ -26,7 +26,7 @@ export class PapersService {
       orderBy: { createdAt: 'asc' },
     });
     if (approved.length === 0) {
-      throw new BadRequestException('no approved questions to freeze — nothing to package');
+      throw new BadRequestException('no approved questions to publish — nothing to package');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -61,7 +61,8 @@ export class PapersService {
         data: {
           paperId: paper.id,
           versionNumber,
-          frozenBy: dto.frozenBy,
+          examDate: new Date(dto.examDate),
+          publishedBy: dto.publishedBy,
           signatureHash,
           items: {
             create: approved.map((q, i) => ({ questionId: q.id, position: i })),

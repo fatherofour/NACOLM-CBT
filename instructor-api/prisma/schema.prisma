@@ -98,17 +98,17 @@ model Session {
 }
 
 model SourceDocument {
-  id          String       @id @default(cuid())
-  session     Session      @relation(fields: [sessionId], references: [id])
-  sessionId   String
-  title       String
-  docType     DocumentType
-  storagePath String
+  id                   String       @id @default(cuid())
+  session              Session      @relation(fields: [sessionId], references: [id])
+  sessionId            String
+  title                String
+  docType              DocumentType
+  storagePath          String
   // Set once this document has also been registered + ingested with the
   // central-api RAG service, which is what actually does the AI drafting —
   // see AiGenerationService. Null until that hand-off succeeds.
   centralApiDocumentId String?
-  uploadedAt            DateTime @default(now())
+  uploadedAt           DateTime     @default(now())
 }
 
 model QuestionBankItem {
@@ -192,13 +192,18 @@ model Paper {
 }
 
 model PaperVersion {
-  id            String      @id @default(cuid())
-  paper         Paper       @relation(fields: [paperId], references: [id])
+  id            String       @id @default(cuid())
+  paper         Paper        @relation(fields: [paperId], references: [id])
   paperId       String
   versionNumber Int
-  frozenAt      DateTime    @default(now())
-  frozenBy      String // free text until real auth lands — see ApprovalLog note
-  signatureHash String // sha256 of the frozen item set, so tampering after freeze is detectable
+  // The exam's planned date. Informational only — it doesn't control when
+  // candidates can actually sit the exam; that's still the invigilator
+  // releasing it at the venue (local-exam-server runs fully offline and has
+  // no connection back to this portal's clock).
+  examDate      DateTime
+  publishedAt   DateTime     @default(now())
+  publishedBy   String // actorName(user) — rank, full name and service number
+  signatureHash String // sha256 of the published item set, so tampering after publishing is detectable
   items         PaperItem[]
   examPackage   ExamPackage?
 
@@ -221,15 +226,15 @@ model PaperItem {
 // as User.passwordHash (see src/auth/password.ts) — the PIN itself is never
 // stored and is only ever returned once, at creation or reset.
 model Candidate {
-  id          String   @id @default(cuid())
-  session     Session  @relation(fields: [sessionId], references: [id])
-  sessionId   String
-  armyNumber  String
-  rank        String
-  fullName    String
-  pinHash     String
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  session    Session  @relation(fields: [sessionId], references: [id])
+  sessionId  String
+  armyNumber String
+  rank       String
+  fullName   String
+  pinHash    String
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
 
   @@unique([sessionId, armyNumber])
 }

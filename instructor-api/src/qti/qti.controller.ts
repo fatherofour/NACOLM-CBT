@@ -6,7 +6,7 @@ export class QtiController {
   constructor(private readonly qti: QtiService) {}
 
   // Same read access as everything else about a paper — this is an export
-  // of already-frozen content, not a mutating action, so it isn't gated to
+  // of already-published content, not a mutating action, so it isn't gated to
   // Exam Officer the way building the encrypted exam package is.
   @Get(':paperVersionId/qti')
   @Header('Content-Type', 'application/zip')

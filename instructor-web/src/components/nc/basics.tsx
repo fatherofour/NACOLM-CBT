@@ -297,7 +297,7 @@ export function MarksBar({ allocated, total }: { allocated: number; total: numbe
 }
 
 export function AuditLine({ actor, action, target, at, detail }: { actor: string; action: string; target?: string; at: string; detail?: string | null }) {
-  const verb = ({ approve: 'approved', reject: 'rejected', edit: 'edited', freeze: 'froze' } as Record<string, string>)[action] ?? action;
+  const verb = ({ approve: 'approved', reject: 'rejected', edit: 'edited', publish: 'published' } as Record<string, string>)[action] ?? action;
   return (
     <li className="nc-audit">
       <span className="nc-audit-who">

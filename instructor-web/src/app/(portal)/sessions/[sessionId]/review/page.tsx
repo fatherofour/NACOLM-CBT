@@ -10,7 +10,7 @@ import { api, qs, type Blueprint, type CoverageRow, type Question } from '@/lib/
 import { sessionInfo } from '@/lib/session-info';
 import { useData } from '@/lib/use-data';
 
-export const PAPER_STEPS = ['Generate', 'Review', 'Coverage', 'Freeze'];
+export const PAPER_STEPS = ['Generate', 'Review', 'Coverage', 'Publish'];
 
 export default function ReviewPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
@@ -145,8 +145,8 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
             {all.length && pending === 0 ? (
               <EmptyState
                 title={`All ${all.length} reviewed`}
-                body={`${approved} approved, ${rejected} rejected. Check coverage before the paper is frozen.`}
-                action={<Link className="btnlink primary" href={`/sessions/${sessionId}/freeze`}>Continue to freeze</Link>}
+                body={`${approved} approved, ${rejected} rejected. Check coverage before the paper is published.`}
+                action={<Link className="btnlink primary" href={`/sessions/${sessionId}/publish`}>Continue to publish</Link>}
               />
             ) : null}
             {!all.length ? (
@@ -176,7 +176,7 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
               {cov.data ? <CoverageTable rows={cov.data} /> : cov.loading ? <Spinner label="Loading…" /> : <p className="m-0 text-sm text-ink-muted">No blueprint yet for this term.</p>}
             </Panel>
             {pending === 0 && all.length ? null : (
-              <p className="m-0 text-sm text-ink-muted">{pending} pending. The paper can’t be frozen until every question is approved or rejected.</p>
+              <p className="m-0 text-sm text-ink-muted">{pending} pending. The paper can’t be published until every question is approved or rejected.</p>
             )}
           </aside>
         </div>

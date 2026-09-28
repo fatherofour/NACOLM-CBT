@@ -15,16 +15,16 @@ interface Row {
   rejected: number;
   pending: number;
   blueprint?: Blueprint;
-  latest?: { title: string; version: number; frozenAt: string };
+  latest?: { title: string; version: number; publishedAt: string };
 }
 
 type Tone = 'field' | 'caution' | 'approved' | 'bank';
 function stage(r: Row): { label: string; tone: Tone; href: string; action: string } {
   const base = `/sessions/${r.sessionId}`;
-  if (r.latest && r.pending === 0) return { label: `Frozen, version ${r.latest.version}`, tone: 'approved', href: `${base}/freeze`, action: 'View paper' };
+  if (r.latest && r.pending === 0) return { label: `Published, version ${r.latest.version}`, tone: 'approved', href: `${base}/publish`, action: 'View paper' };
   if (!r.blueprint && r.total === 0) return { label: 'Not started', tone: 'bank', href: `/sessions/new?session=${r.sessionId}`, action: 'Set up paper' };
   if (r.pending > 0) return { label: 'In review', tone: 'field', href: `${base}/review`, action: 'Continue review' };
-  return { label: 'Ready to freeze', tone: 'field', href: `${base}/freeze`, action: 'Check coverage' };
+  return { label: 'Ready to publish', tone: 'field', href: `${base}/publish`, action: 'Check coverage' };
 }
 
 async function loadRows(): Promise<Row[]> {
@@ -38,8 +38,8 @@ async function loadRows(): Promise<Row[]> {
         api.get<Paper[]>(`/papers${qs({ sessionId: s.id })}`),
       ]);
       const count = (st: string) => progress.find((p) => p.status === st)?._count ?? 0;
-      const versions = papers.flatMap((p) => p.versions.map((v) => ({ title: p.title, version: v.versionNumber, frozenAt: v.frozenAt })));
-      versions.sort((a, b) => b.frozenAt.localeCompare(a.frozenAt));
+      const versions = papers.flatMap((p) => p.versions.map((v) => ({ title: p.title, version: v.versionNumber, publishedAt: v.publishedAt })));
+      versions.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
       const approved = count('APPROVED'), rejected = count('REJECTED'), pending = count('DRAFT');
       return { course: c, sessionId: s.id, label: s.label, total: approved + rejected + pending, approved, rejected, pending, blueprint: blueprints[0], latest: versions[0] };
     }),
@@ -48,7 +48,7 @@ async function loadRows(): Promise<Row[]> {
 
 export default function SessionsPage() {
   const { data: rows, error, loading, reload } = useData(loadRows, []);
-  // Papers being set: a session with a blueprint, drafts or a frozen paper.
+  // Papers being set: a session with a blueprint, drafts or a published paper.
   // Past years that only hold approved bank questions live under Question bank.
   const visible = (rows ?? []).filter((r) => r.blueprint || r.pending > 0 || r.latest).sort((a, b) => b.label.localeCompare(a.label) || a.course.code.localeCompare(b.course.code));
   const attention = visible.filter((r) => r.pending > 0);
@@ -57,7 +57,7 @@ export default function SessionsPage() {
     <>
       <PageHead
         title="Exam sessions"
-        intro="Each course and term you’re setting a paper for. Papers stay here from the first draft until they’re frozen."
+        intro="Each course and term you’re setting a paper for. Papers stay here from the first draft until they’re published."
         action={
           <Link className="btnlink primary !h-11 md:!h-9" href="/sessions/new">
             <Glyph name="plus" />
