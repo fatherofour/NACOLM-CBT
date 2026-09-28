@@ -27,6 +27,30 @@ cross-service interop check, not a same-language round-trip.
 CBT_PACKAGE_PATH=path\to\exam.cbtpkg CBT_EXAM_ID=<exam-uuid> CBT_DB_PATH=data\exam.db CBT_ROSTER_PATH=roster.csv CBT_CENTRE_NAME="Hall A" go run .\cmd\server
 ```
 
+### The invigilator's own PC can be the server
+
+This is one process, not a client/server pair of separate machines — it's
+fine, and the recommended small-venue setup, for the invigilator's own PC to
+run `cmd/server` while also being where they watch the
+[invigilator console](#invigilator-console). `CBT_LISTEN_ADDR` binds every
+network interface by default (`:8080`, i.e. `0.0.0.0:8080`), so the same
+running process is reachable two ways at once:
+
+- **Candidate PCs elsewhere on the venue LAN** open
+  `http://<invigilator-PC-LAN-IP>:8080/kiosk/?seat=<label>` — find that IP
+  with `ipconfig` (Windows) or `ip addr` (Linux) beforehand and write it on
+  the whiteboard, or set `CBT_CENTRE_NAME` and let candidates confirm the
+  centre name on the sign-in screen matches.
+- **The invigilator, on that same PC**, just opens
+  `http://localhost:8080/invigilator/` in a normal browser window — no
+  network hop, no separate machine to provision.
+
+For a venue with only a handful of computers this means no dedicated server
+hardware at all: one of the exam PCs (the invigilator's) does double duty.
+For a larger venue, running the server on its own machine and putting the
+invigilator console on a second monitor there works exactly the same way —
+nothing about the server cares which physical box it's on.
+
 The server starts air-gapped-safe: `/checkin` and `/submit` are refused
 with `423 Locked` until `/release` is called with the AES key (hex-encoded).
 That call is the runtime equivalent of the invigilator triggering the
