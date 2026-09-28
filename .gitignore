@@ -10,7 +10,11 @@ central-api/*.egg-info/
 # Go (local-exam-server)
 local-exam-server/bin/
 local-exam-server/data/
+local-exam-server/venue-data/
 local-exam-server/*.db
+
+# Docker-mounted upload storage (deployment-local, never source)
+/uploads/
 
 # Node (future frontends)
 node_modules/

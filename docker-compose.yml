@@ -9,6 +9,9 @@ services:
       - "5442:5432"
     volumes:
       - cbt_db_data:/var/lib/postgresql/data
+      # Runs once, only against a fresh volume: creates the separate
+      # instructor_api database alongside central-api's own "cbt" database.
+      - ./db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cbt"]
       interval: 5s
@@ -19,6 +22,8 @@ services:
     build: ./central-api
     environment:
       CBT_DATABASE_URL: postgresql+psycopg://cbt:cbt@db:5432/cbt
+      CBT_JWT_SECRET: ${CENTRAL_API_JWT_SECRET:?set CENTRAL_API_JWT_SECRET in .env}
+      CBT_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "8010:8000"
     depends_on:
@@ -26,6 +31,63 @@ services:
         condition: service_healthy
     volumes:
       - ./central-api/data:/app/data
+
+  instructor-api:
+    build: ./instructor-api
+    environment:
+      DATABASE_URL: postgresql://cbt:cbt@db:5432/instructor_api
+      DOCUMENT_STORAGE_ROOT: /data/documents
+      CENTRAL_API_URL: http://central-api:8000
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      NODE_ENV: production
+      PORT: "8020"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Host-visible upload root — DocumentsService splits every upload into
+      # <course>/<term>/past-papers/ or .../study-material/ underneath this
+      # automatically (see instructor-api/src/documents/documents.service.ts).
+      - ./uploads/documents:/data/documents
+
+  instructor-web:
+    build:
+      context: ./instructor-web
+      # Must be a build arg, not just a runtime environment var — see the
+      # comment in instructor-web/Dockerfile for why.
+      args:
+        INSTRUCTOR_API_URL: http://instructor-api:8020
+    environment:
+      INSTRUCTOR_API_URL: http://instructor-api:8020
+    ports:
+      - "8080:3000"
+    depends_on:
+      - instructor-api
+
+  # Not part of the default `docker compose up`: this runs at exam venues,
+  # not centrally, and needs a real frozen paper's .cbtpkg + release key +
+  # roster CSV before it can even start (config.FromEnv fails fast without
+  # them). Build it now so the image is ready; bring it up explicitly with
+  # `docker compose --profile venue up -d local-exam-server` once those
+  # exist and CBT_EXAM_ID / CBT_ROSTER_PATH below are filled in.
+  local-exam-server:
+    build: ./local-exam-server
+    profiles: ["venue"]
+    environment:
+      CBT_PACKAGE_PATH: /data/exam.cbtpkg
+      # Compose validates every service's environment block even when it's
+      # excluded by profile, so this can't be a hard-required (":?") var
+      # without breaking `docker compose up` for the other services — the
+      # Go binary itself already fails fast with a clear message if this is
+      # empty (see config.FromEnv), which is the right place for that check.
+      CBT_EXAM_ID: ${CBT_EXAM_ID:-}
+      CBT_ROSTER_PATH: /data/roster.csv
+      CBT_DB_PATH: /data/exam.db
+      CBT_CENTRE_NAME: ${CBT_CENTRE_NAME:-Exam centre}
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./local-exam-server/venue-data:/data
 
 volumes:
   cbt_db_data:
