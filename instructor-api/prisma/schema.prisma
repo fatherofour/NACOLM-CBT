@@ -37,6 +37,19 @@ enum UserRole {
   ADMIN
 }
 
+// Pipeline state for one pen-and-paper theory answer, from upload through to
+// a published result. AI_MARKING_FAILED and OCR_FAILED are terminal until
+// the instructor re-runs that step — they never silently fall through to a
+// score.
+enum ScriptAnswerStatus {
+  UPLOADED
+  OCR_FAILED
+  AI_MARKING_FAILED
+  PENDING_REVIEW
+  REVIEWED
+  PUBLISHED
+}
+
 // Portal users. Passwords are scrypt hashes (see src/auth/password.ts);
 // accounts are created with scripts/create-user.mjs, not self-registration.
 model User {
@@ -135,6 +148,7 @@ model QuestionBankItem {
   markingScheme MarkingScheme?
   approvalLogs  ApprovalLog[]
   paperItems    PaperItem[]
+  scriptAnswers TheoryScriptAnswer[]
 }
 
 model MarkingScheme {
@@ -206,6 +220,7 @@ model PaperVersion {
   signatureHash String // sha256 of the published item set, so tampering after publishing is detectable
   items         PaperItem[]
   examPackage   ExamPackage?
+  scriptAnswers TheoryScriptAnswer[]
 
   @@unique([paperId, versionNumber])
 }
@@ -236,6 +251,8 @@ model Candidate {
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
 
+  scriptAnswers TheoryScriptAnswer[]
+
   @@unique([sessionId, armyNumber])
 }
 
@@ -252,6 +269,52 @@ model ExamPackage {
   poolSize       Int
   builtAt        DateTime     @default(now())
   builtBy        String
+}
+
+// A pen-and-paper theory answer: the instructor's exam is written on paper,
+// scanned, and uploaded here per candidate per question. A local model reads
+// the handwriting (OCR) and then marks it against the question's
+// MarkingScheme/ConceptGroups the same way the CBT keyword engine would, but
+// judging paraphrase rather than exact keyword hits — see
+// theory-scripts/ollama.service.ts for why this runs against a local Ollama
+// model rather than a paid API during this testing phase. The AI's score is
+// never final: it always lands in PENDING_REVIEW with its justification
+// attached, and only an instructor's explicit review moves it to REVIEWED,
+// then PUBLISHED. instructorScore is null until reviewed, even if the
+// instructor agrees with the AI number verbatim — that keeps "reviewed" and
+// "not yet looked at" unambiguous in the data, not just in the status field.
+model TheoryScriptAnswer {
+  id             String       @id @default(cuid())
+  paperVersion   PaperVersion @relation(fields: [paperVersionId], references: [id])
+  paperVersionId String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id])
+  candidateId    String
+  question       QuestionBankItem @relation(fields: [questionId], references: [id])
+  questionId     String
+
+  imagePath       String // uploaded scan of this candidate's answer to this question
+  uploadedBy      String
+  uploadedAt      DateTime @default(now())
+
+  transcribedText String? // OCR output
+  ocrModel        String?
+  ocrError        String?
+
+  aiScore         Float?
+  aiMaxScore      Float?
+  aiJustification String?
+  aiModel         String?
+  aiError         String?
+
+  instructorScore Float?
+  instructorNotes String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+
+  status    ScriptAnswerStatus @default(UPLOADED)
+  updatedAt DateTime           @updatedAt
+
+  @@unique([paperVersionId, candidateId, questionId])
 }
 
 // Every mutating action on a question (approve / edit / reject) writes one of

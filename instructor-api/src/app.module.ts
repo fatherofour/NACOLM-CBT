@@ -14,6 +14,8 @@ import { UsersModule } from './users/users.module.js';
 import { CandidatesModule } from './candidates/candidates.module.js';
 import { PackagesModule } from './packages/packages.module.js';
 import { QtiModule } from './qti/qti.module.js';
+import { OllamaModule } from './ollama/ollama.module.js';
+import { TheoryScriptsModule } from './theory-scripts/theory-scripts.module.js';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { QtiModule } from './qti/qti.module.js';
     MarkingSchemesModule,
     BlueprintsModule,
     PapersModule,
+    OllamaModule,
+    TheoryScriptsModule,
   ],
   controllers: [AppController],
 })

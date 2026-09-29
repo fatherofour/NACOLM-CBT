@@ -79,9 +79,14 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
         action={
           <div className="flex flex-col items-end gap-3 md:w-[520px]">
             <WizardSteps steps={['Generate', 'Review', 'Coverage', 'Publish']} current={3} />
-            <Link className="btnlink" href={`/sessions/${sessionId}/candidates`}>
-              Manage candidates
-            </Link>
+            <div className="flex gap-4">
+              <Link className="btnlink" href={`/sessions/${sessionId}/scripts`}>
+                Theory scripts
+              </Link>
+              <Link className="btnlink" href={`/sessions/${sessionId}/candidates`}>
+                Manage candidates
+              </Link>
+            </div>
           </div>
         }
       />

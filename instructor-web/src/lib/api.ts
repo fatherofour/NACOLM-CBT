@@ -127,6 +127,35 @@ export function rosterCsv(rows: { armyNumber: string; rank: string; fullName: st
   return lines.join('\n') + '\n';
 }
 
+// ---- Handwritten theory scripts -------------------------------------------
+
+export type ScriptStatus = 'UPLOADED' | 'OCR_FAILED' | 'AI_MARKING_FAILED' | 'PENDING_REVIEW' | 'REVIEWED' | 'PUBLISHED';
+export interface ScriptAnswer {
+  id: string;
+  paperVersionId: string;
+  candidateId: string;
+  questionId: string;
+  imagePath: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  transcribedText: string | null;
+  ocrModel: string | null;
+  ocrError: string | null;
+  aiScore: number | null;
+  aiMaxScore: number | null;
+  aiJustification: string | null;
+  aiModel: string | null;
+  aiError: string | null;
+  instructorScore: number | null;
+  instructorNotes: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  status: ScriptStatus;
+  updatedAt: string;
+  candidate: Candidate;
+  question: { id: string; topic: string; body: string };
+}
+
 export function downloadCsv(filename: string, csv: string) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);

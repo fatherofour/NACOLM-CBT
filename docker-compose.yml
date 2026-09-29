@@ -32,6 +32,14 @@ services:
     volumes:
       - ./central-api/data:/app/data
 
+  # Local models for pen-and-paper theory marking (no paid API). Pull once with:
+  #   docker compose exec ollama ollama pull qwen2.5vl:3b
+  #   docker compose exec ollama ollama pull deepseek-r1
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_models:/root/.ollama
+
   instructor-api:
     build: ./instructor-api
     environment:
@@ -41,10 +49,17 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       NODE_ENV: production
       PORT: "8020"
+      SCRIPT_STORAGE_ROOT: /data/theory-scripts
+      OLLAMA_BASE_URL: http://ollama:11434
+      OCR_MODEL: ${OCR_MODEL:-qwen2.5vl:3b}
+      MARKING_MODEL: ${MARKING_MODEL:-deepseek-r1}
     depends_on:
       db:
         condition: service_healthy
+      ollama:
+        condition: service_started
     volumes:
+      - ./uploads/theory-scripts:/data/theory-scripts
       # Host-visible upload root — DocumentsService splits every upload into
       # <course>/<term>/past-papers/ or .../study-material/ underneath this
       # automatically (see instructor-api/src/documents/documents.service.ts).
@@ -91,3 +106,4 @@ services:
 
 volumes:
   cbt_db_data:
+  ollama_models:
