@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.deps import get_db
+from app.core.config import Settings, get_settings
 from app.db.base import Base
 from app.main import app
 from app.models.document import Document
@@ -47,12 +48,12 @@ def db_session(db_engine):
     session.close()
 
 
+TEST_SERVICE_TOKEN = "test-service-token"
+
+
 @pytest.fixture
-def client(db_engine):
-    """TestClient wired to this test's isolated DB. Deliberately NOT used
-    as `with TestClient(app) as c:` — that would run app.main's lifespan
-    hook, which tries to reach a real Postgres instance and create the
-    pgvector extension."""
+def raw_client(db_engine):
+    """Client with no service token header, for testing the auth gate itself."""
     Session = sessionmaker(bind=db_engine, autoflush=False, autocommit=False)
 
     def override_get_db():
@@ -63,7 +64,18 @@ def client(db_engine):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_settings] = lambda: Settings(service_token=TEST_SERVICE_TOKEN)
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_settings, None)
+
+
+@pytest.fixture
+def client(raw_client):
+    """raw_client plus the service token. Deliberately NOT used as
+    `with TestClient(app) as c:` — that would run app.main's lifespan
+    hook, which tries to reach a real Postgres instance."""
+    raw_client.headers["X-Service-Token"] = TEST_SERVICE_TOKEN
+    return raw_client

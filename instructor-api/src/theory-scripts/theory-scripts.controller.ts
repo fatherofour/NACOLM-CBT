@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -18,8 +19,14 @@ import { ReviewScriptAnswerDto } from './dto/review-script-answer.dto.js';
 import { CurrentUser, Roles, actorName, type SessionUser } from '../auth/decorators.js';
 import type { ScriptAnswerStatus } from '../generated/prisma/enums.js';
 
+// This controller drives the local AI models, so it is limited to staff roles
+// explicitly rather than "any signed-in user": a role added later gets no AI
+// access until someone decides it should.
 @Controller('theory-scripts')
+@Roles('INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN')
 export class TheoryScriptsController {
+  private readonly logger = new Logger(TheoryScriptsController.name);
+
   constructor(private readonly scripts: TheoryScriptsService) {}
 
   @Post()
@@ -38,6 +45,7 @@ export class TheoryScriptsController {
     if (!paperVersionId || !candidateId || !questionId) {
       throw new BadRequestException('paperVersionId, candidateId and questionId are required');
     }
+    this.logger.log(`AI pipeline: scan uploaded by ${actorName(user)} for candidate ${candidateId}, question ${questionId}`);
     return this.scripts.upload({ paperVersionId, candidateId, questionId, uploadedBy: actorName(user), file });
   }
 
@@ -66,12 +74,14 @@ export class TheoryScriptsController {
   }
 
   @Post(':id/ocr')
-  retryOcr(@Param('id') id: string) {
+  retryOcr(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    this.logger.log(`AI pipeline: OCR re-run on ${id} by ${actorName(user)}`);
     return this.scripts.restart(id, 'ocr');
   }
 
   @Post(':id/mark')
-  retryMarking(@Param('id') id: string) {
+  retryMarking(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    this.logger.log(`AI pipeline: marking re-run on ${id} by ${actorName(user)}`);
     return this.scripts.restart(id, 'mark');
   }
 

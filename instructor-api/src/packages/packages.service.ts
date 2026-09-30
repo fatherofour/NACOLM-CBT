@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { centralApiHeaders } from '../central-api/central-api-auth.js';
 
 const CENTRAL_API_URL = process.env.CENTRAL_API_URL ?? 'http://localhost:8010';
 
@@ -73,7 +74,7 @@ export class PackagesService {
 
     const res = await fetch(`${CENTRAL_API_URL}/package-bridge/build`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: centralApiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!res.ok) {

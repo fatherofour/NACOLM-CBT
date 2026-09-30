@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { BlueprintsService } from './blueprints.service.js';
 import { CreateBlueprintDto } from './dto/create-blueprint.dto.js';
+import { Roles } from '../auth/decorators.js';
 
 @Controller('blueprints')
 export class BlueprintsController {
@@ -17,6 +18,7 @@ export class BlueprintsController {
   }
 
   @Post(':id/generate')
+  @Roles('INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN')
   generate(@Param('id') id: string) {
     return this.blueprints.generate(id);
   }

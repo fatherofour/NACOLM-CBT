@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI
 from sqlalchemy import text
 
 from app.api.routes import documents, drafts, exams, package_bridge, questions
+from app.core.security import require_service_token
 from app.db.base import Base
 from app.db.session import engine
 
@@ -20,23 +20,22 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="CBT Central Authoring & Management API", lifespan=lifespan)
-
-# Dev-permissive: the instructor portal runs on a different origin (Vite
-# dev server) than this API. Tighten to the real portal's origin(s) before
-# this is exposed beyond a local/demo network.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+# No public API docs, and no CORS: browsers never talk to this service. The
+# instructor portal reaches it only through instructor-api on the private network.
+app = FastAPI(
+    title="CBT Central Authoring & Management API",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
-app.include_router(documents.router)
-app.include_router(drafts.router)
-app.include_router(questions.router)
-app.include_router(exams.router)
-app.include_router(package_bridge.router)
+_protected = [Depends(require_service_token)]
+app.include_router(documents.router, dependencies=_protected)
+app.include_router(drafts.router, dependencies=_protected)
+app.include_router(questions.router, dependencies=_protected)
+app.include_router(exams.router, dependencies=_protected)
+app.include_router(package_bridge.router, dependencies=_protected)
 
 
 @app.get("/health")

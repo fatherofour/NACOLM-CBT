@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { centralApiHeaders } from '../central-api/central-api-auth.js';
 
 /**
  * The actual AI/RAG drafting (embeddings, retrieval, LLM prompting) stays in
@@ -52,7 +53,7 @@ export class AiGenerationService {
     form.set('title', params.title);
     form.set('file', new Blob([buffer]), basename(params.storagePath));
 
-    const uploadRes = await fetch(`${CENTRAL_API_URL}/documents`, { method: 'POST', body: form });
+    const uploadRes = await fetch(`${CENTRAL_API_URL}/documents`, { method: 'POST', headers: centralApiHeaders(), body: form });
     if (!uploadRes.ok) {
       throw new Error(`central-api document upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
     }
@@ -60,7 +61,7 @@ export class AiGenerationService {
     this.logger.log(`registered ${params.title} with central-api as ${uploaded.id}`);
 
     if (params.docType === 'study_material') {
-      const ingestRes = await fetch(`${CENTRAL_API_URL}/documents/${uploaded.id}/ingest`, { method: 'POST' });
+      const ingestRes = await fetch(`${CENTRAL_API_URL}/documents/${uploaded.id}/ingest`, { method: 'POST', headers: centralApiHeaders() });
       if (!ingestRes.ok) {
         throw new Error(`central-api ingest failed: ${ingestRes.status} ${await ingestRes.text()}`);
       }
@@ -80,7 +81,7 @@ export class AiGenerationService {
 
     const stageRes = await fetch(`${CENTRAL_API_URL}/question-drafts/stage`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: centralApiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         course_code: params.courseCode,
         session_label: params.sessionLabel,
@@ -100,7 +101,7 @@ export class AiGenerationService {
     // The stage response is intentionally minimal; fetch full items (options,
     // correct_index, model_answer, rubric) so we can persist them here.
     const params2 = new URLSearchParams({ course_code: params.courseCode, session_label: params.sessionLabel });
-    const listRes = await fetch(`${CENTRAL_API_URL}/questions/drafts?${params2}`);
+    const listRes = await fetch(`${CENTRAL_API_URL}/questions/drafts?${params2}`, { headers: centralApiHeaders() });
     if (!listRes.ok) {
       throw new Error(`central-api list-drafts failed: ${listRes.status} ${await listRes.text()}`);
     }

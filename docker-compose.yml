@@ -5,8 +5,10 @@ services:
       POSTGRES_USER: cbt
       POSTGRES_PASSWORD: cbt
       POSTGRES_DB: cbt
+    # Loopback only: Docker-published ports bypass the host firewall, so a bare
+    # "5442:5432" would expose the database to the internet.
     ports:
-      - "5442:5432"
+      - "127.0.0.1:5442:5432"
     volumes:
       - cbt_db_data:/var/lib/postgresql/data
       # Runs once, only against a fresh volume: creates the separate
@@ -24,8 +26,11 @@ services:
       CBT_DATABASE_URL: postgresql+psycopg://cbt:cbt@db:5432/cbt
       CBT_JWT_SECRET: ${CENTRAL_API_JWT_SECRET:?set CENTRAL_API_JWT_SECRET in .env}
       CBT_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Only instructor-api knows this; central-api refuses every call without it.
+      CBT_SERVICE_TOKEN: ${CENTRAL_API_SERVICE_TOKEN:?set CENTRAL_API_SERVICE_TOKEN in .env}
+    # Loopback only: the AI service is reached through instructor-api, never directly.
     ports:
-      - "8010:8000"
+      - "127.0.0.1:8010:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -39,6 +44,10 @@ services:
     image: ollama/ollama:latest
     volumes:
       - ollama_models:/root/.ollama
+    # No published ports, and on its own network so that only instructor-api
+    # (the portal's backend) can reach the models.
+    networks:
+      - ai
 
   instructor-api:
     build: ./instructor-api
@@ -46,6 +55,7 @@ services:
       DATABASE_URL: postgresql://cbt:cbt@db:5432/instructor_api
       DOCUMENT_STORAGE_ROOT: /data/documents
       CENTRAL_API_URL: http://central-api:8000
+      CENTRAL_API_SERVICE_TOKEN: ${CENTRAL_API_SERVICE_TOKEN:?set CENTRAL_API_SERVICE_TOKEN in .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       NODE_ENV: production
       PORT: "8020"
@@ -53,6 +63,9 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       OCR_MODEL: ${OCR_MODEL:-qwen2.5vl:3b}
       MARKING_MODEL: ${MARKING_MODEL:-deepseek-r1}
+    networks:
+      - default
+      - ai
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +116,9 @@ services:
       - "8081:8080"
     volumes:
       - ./local-exam-server/venue-data:/data
+
+networks:
+  ai:
 
 volumes:
   cbt_db_data:

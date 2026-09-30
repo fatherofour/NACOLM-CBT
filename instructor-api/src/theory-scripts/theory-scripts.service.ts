@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
@@ -16,6 +16,10 @@ const STORAGE_ROOT = process.env.SCRIPT_STORAGE_ROOT ?? './data/theory-scripts';
 // (e.g. MARKING_MODEL=deepseek-r1) without touching the OCR step.
 const OCR_MODEL = process.env.OCR_MODEL ?? 'qwen2.5vl:3b';
 const MARKING_MODEL = process.env.MARKING_MODEL ?? 'deepseek-r1';
+
+// Each job holds a CPU-bound model for minutes, so an unbounded backlog would let
+// one client (or a stuck loop) tie the model up indefinitely.
+const MAX_QUEUED_AI_JOBS = Number(process.env.AI_MAX_QUEUED_JOBS ?? 40);
 
 const OCR_PROMPT = `Transcribe all handwritten text in this image exactly as the student wrote it. Preserve line breaks where they're meaningful (e.g. between numbered points). Do not summarize, correct spelling/grammar, or add any commentary or headers of your own — output only the transcription. Where a word is genuinely illegible, write [illegible] in its place.`;
 
@@ -85,6 +89,7 @@ export class TheoryScriptsService {
     uploadedBy: string;
     file: Express.Multer.File;
   }) {
+    this.assertQueueHasRoom();
     const item = await this.prisma.paperItem.findFirst({
       where: { paperVersionId: params.paperVersionId, questionId: params.questionId },
       include: { question: true },
@@ -149,12 +154,27 @@ export class TheoryScriptsService {
   // One job at a time: a CPU-only Ollama thrashes if several models load at once.
   private queue: Promise<unknown> = Promise.resolve();
 
+  private queuedJobs = 0;
+
+  private assertQueueHasRoom() {
+    if (this.queuedJobs >= MAX_QUEUED_AI_JOBS) {
+      throw new HttpException('The AI reader is busy. Wait for the current scripts to finish, then try again.', HttpStatus.TOO_MANY_REQUESTS);
+    }
+  }
+
   private enqueue(id: string, job: () => Promise<unknown>) {
-    this.queue = this.queue.then(job).catch((err) => this.logger.error(`pipeline job for ${id} crashed: ${String(err)}`));
+    this.queuedJobs++;
+    this.queue = this.queue
+      .then(job)
+      .catch((err) => this.logger.error(`pipeline job for ${id} crashed: ${String(err)}`))
+      .finally(() => {
+        this.queuedJobs--;
+      });
   }
 
   /** Re-run from OCR or from marking in the background. */
   async restart(id: string, from: 'ocr' | 'mark') {
+    this.assertQueueHasRoom();
     const answer = await this.get(id);
     if (answer.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be re-run');
     if (from === 'mark' && !answer.transcribedText) throw new BadRequestException('no transcription yet — run OCR first');

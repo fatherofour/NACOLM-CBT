@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60
 
+    # Shared secret instructor-api sends as X-Service-Token. Unset = all protected routes refuse.
+    service_token: str | None = None
+
     anthropic_api_key: str | None = None
     llm_model: str = "claude-sonnet-5"
 
