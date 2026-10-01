@@ -1,5 +1,5 @@
 'use client';
-import { use, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Chip, EmptyState, Spinner } from '@/components/nc/basics';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { api, downloadCsv, qs, rosterCsv, type Candidate, type NewCandidatePin } from '@/lib/api';
@@ -15,6 +15,11 @@ export default function CandidatesPage({ params }: { params: Promise<{ sessionId
 
   const [mode, setMode] = useState<'none' | 'single' | 'bulk'>('none');
   const [justCreated, setJustCreated] = useState<NewCandidatePin[] | null>(null);
+  const pinsRef = useRef<HTMLDivElement>(null);
+  // The new PINs appear at the top of the page; bring them into view from wherever the button was.
+  useEffect(() => {
+    if (justCreated?.length) pinsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [justCreated]);
 
   return (
     <>
@@ -34,6 +39,7 @@ export default function CandidatesPage({ params }: { params: Promise<{ sessionId
         }
       />
 
+      <div ref={pinsRef} className="scroll-mt-4" />
       {justCreated?.length ? (
         <Alert
           tone="info"
@@ -160,34 +166,43 @@ function CandidateRow({
   mobile?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  async function resetPin() {
-    if (!confirm(`Reset the PIN for ${c.armyNumber}? Their old admission slip stops working.`)) return;
+  async function run(fn: () => Promise<void>) {
     setBusy(true);
+    setError('');
     try {
-      const r = await api.post<NewCandidatePin>(`/candidates/${c.id}/reset-pin`, {});
-      onPinReset(r);
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
     } finally {
       setBusy(false);
     }
   }
 
-  async function toggleActive() {
-    setBusy(true);
-    try {
-      await api.patch(`/candidates/${c.id}`, { active: !c.active });
-      await onReload();
-    } finally {
-      setBusy(false);
-    }
+  function resetPin() {
+    if (!confirm(`Reset the PIN for ${c.armyNumber}? Their old admission slip stops working.`)) return;
+    void run(async () => {
+      onPinReset(await api.post<NewCandidatePin>(`/candidates/${c.id}/reset-pin`, {}));
+    });
   }
 
   const actions = (
-    <div className="flex flex-wrap gap-2">
-      <Button variant="quiet" disabled={busy} onClick={resetPin}>Reset PIN</Button>
-      <Button variant={c.active ? 'danger' : 'secondary'} disabled={busy} onClick={toggleActive}>
-        {c.active ? 'Withdraw' : 'Reinstate'}
-      </Button>
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-wrap gap-2">
+        <Button variant="quiet" disabled={busy} onClick={resetPin}>{busy ? 'Working…' : 'Reset PIN'}</Button>
+        <Button
+          variant={c.active ? 'danger' : 'secondary'}
+          disabled={busy}
+          onClick={() => run(async () => {
+            await api.patch(`/candidates/${c.id}`, { active: !c.active });
+            await onReload();
+          })}
+        >
+          {c.active ? 'Withdraw' : 'Reinstate'}
+        </Button>
+      </div>
+      {error ? <span role="alert" className="text-sm text-[var(--rejected)]">{error}</span> : null}
     </div>
   );
 

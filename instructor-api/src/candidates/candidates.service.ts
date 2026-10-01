@@ -109,7 +109,8 @@ export class CandidatesService {
         if (isNotFound(err)) throw new NotFoundException('Candidate not found.');
         throw err;
       });
-    return { ...candidate, generatedPin: pin };
+    // Same shape as a bulk-import row, so the portal shows it and adds it to roster.csv the same way.
+    return { ...candidate, pin };
   }
 }
 
