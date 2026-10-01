@@ -1,25 +1,70 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  NotFoundException,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OllamaService } from '../ollama/ollama.service.js';
 import type { ScriptAnswerStatus } from '../generated/prisma/enums.js';
+import { AiQueue, type AiJob } from './ai-queue.js';
+import { encodeSheetCode, MAX_SHEET_PAGES, readSheetCode, type SheetCode } from './answer-sheet-code.js';
 
 const STORAGE_ROOT = process.env.SCRIPT_STORAGE_ROOT ?? './data/theory-scripts';
 
-// Two separate model slots because OCR (reading the handwriting) and marking
-// (judging the transcribed answer against a rubric) are different jobs — a
-// vision model is required for the first, but the second is plain text and
-// could just as well be pointed at a stronger local reasoning model later
-// (e.g. MARKING_MODEL=deepseek-r1) without touching the OCR step.
+// OCR (reading the handwriting) needs a vision model; marking is plain text.
+// The default marker is a small non-reasoning model: on the 4-core server it
+// marks in about 25s against about 150s for deepseek-r1, with similar scores
+// on the benchmark set. deepseek-r1 stays available as a slower second opinion.
 const OCR_MODEL = process.env.OCR_MODEL ?? 'qwen2.5vl:3b';
-const MARKING_MODEL = process.env.MARKING_MODEL ?? 'deepseek-r1';
+const MARKING_MODEL = process.env.MARKING_MODEL ?? 'qwen3:4b';
+const DEEP_MARKING_MODEL = process.env.DEEP_MARKING_MODEL ?? 'deepseek-r1';
+
+// The vision model resamples anything larger to about the same token count,
+// so 1000px reads as well as 1400px in half the time.
+const OCR_MAX_PX = Number(process.env.OCR_MAX_PX ?? 1000);
+
+// Keep a model loaded between jobs of a batch; it is unloaded explicitly when
+// the queue switches model, since the server can't hold two at once.
+const KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE ?? '15m';
 
 // Each job holds a CPU-bound model for minutes, so an unbounded backlog would let
-// one client (or a stuck loop) tie the model up indefinitely.
-const MAX_QUEUED_AI_JOBS = Number(process.env.AI_MAX_QUEUED_JOBS ?? 40);
+// one client (or a stuck loop) tie the model up indefinitely. Sized for one
+// bulk upload of a class.
+const MAX_QUEUED_AI_JOBS = Number(process.env.AI_MAX_QUEUED_JOBS ?? 200);
+
+const isReasoningModel = (model: string) => /deepseek-r1|qwq/.test(model);
+// qwen3 thinks by default; switched off it answers in seconds. Other models
+// either can't think (and reject the flag) or are reasoning models by design.
+const thinkFlag = (model: string) => (/qwen3/.test(model) ? false : undefined);
+
+const PIPELINE_RESET = {
+  status: 'UPLOADED' as ScriptAnswerStatus,
+  transcribedText: null,
+  ocrModel: null,
+  ocrError: null,
+  aiScore: null,
+  aiMaxScore: null,
+  aiJustification: null,
+  aiModel: null,
+  aiError: null,
+  instructorScore: null,
+  instructorNotes: null,
+  reviewedBy: null,
+  reviewedAt: null,
+};
+
+const SCAN_FILE = /\.(jpe?g|png)$/i;
+
+// Bulk-filed pages are stored as ..._p<n>.jpg so merged chunks can be put back in order.
+const pageNumberOf = (path: string) => Number(/_p(\d+)\.jpg$/.exec(path)?.[1] ?? 1);
 
 const OCR_PROMPT = `Transcribe all handwritten text in this image exactly as the student wrote it. Preserve line breaks where they're meaningful (e.g. between numbered points). Do not summarize, correct spelling/grammar, or add any commentary or headers of your own — output only the transcription. Where a word is genuinely illegible, write [illegible] in its place.`;
 
@@ -73,107 +118,314 @@ Judge each concept on whether the student's own words clearly demonstrate the id
 Respond with ONLY a JSON object of the exact shape {"score": <number>, "justification": "<string>"} — no other text.`;
 }
 
+
+export interface BulkResult {
+  queued: { candidate: string; question: string; pages: number }[];
+  unassigned: { file: string; reason: string }[];
+}
+
 @Injectable()
-export class TheoryScriptsService {
+export class TheoryScriptsService implements OnModuleInit {
   private readonly logger = new Logger(TheoryScriptsService.name);
+  private readonly queue: AiQueue;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ollama: OllamaService,
-  ) {}
+  ) {
+    this.queue = new AiQueue(
+      (job) => (job.stage === 'ocr' ? this.runOcr(job.id) : this.runMarking(job.id, job.model)),
+      (previous) => this.ollama.unload(previous),
+      (job, err) => this.logger.error(`pipeline job ${job.stage} for ${job.id} crashed: ${String(err)}`),
+    );
+  }
 
-  async upload(params: {
+  /** The queue lives in memory, so a restart would strand scripts mid-pipeline; pick them back up. */
+  async onModuleInit() {
+    const stranded = await this.prisma.theoryScriptAnswer.findMany({
+      where: { status: 'UPLOADED' },
+      select: { id: true, transcribedText: true },
+      orderBy: { uploadedAt: 'asc' },
+    });
+    for (const s of stranded) {
+      this.queue.add(s.transcribedText ? this.markJob(s.id) : this.ocrJob(s.id));
+    }
+    if (stranded.length) this.logger.log(`resumed ${stranded.length} theory script(s) left in the AI pipeline`);
+  }
+
+  private ocrJob = (id: string): AiJob => ({ id, stage: 'ocr', model: OCR_MODEL });
+  private markJob = (id: string, deep = false): AiJob => ({ id, stage: 'mark', model: deep ? DEEP_MARKING_MODEL : MARKING_MODEL });
+
+  private assertQueueHasRoom(jobs = 1) {
+    if (this.queue.size() + jobs > MAX_QUEUED_AI_JOBS) {
+      throw new HttpException(
+        `The AI reader is busy (${this.queue.size()} scripts waiting). Wait for some to finish, then try again.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  queueStatus() {
+    return { ...this.queue.status(), ocrModel: OCR_MODEL, markingModel: MARKING_MODEL, deepMarkingModel: DEEP_MARKING_MODEL };
+  }
+
+  private async paperContext(paperVersionId: string) {
+    const version = await this.prisma.paperVersion.findUnique({
+      where: { id: paperVersionId },
+      include: { paper: true, items: { include: { question: true }, orderBy: { position: 'asc' } } },
+    });
+    if (!version) throw new NotFoundException('paper version not found');
+    const theory = version.items.filter((i) => i.question.type === 'THEORY');
+    return { version, theory };
+  }
+
+  private async checkTarget(paperVersionId: string, candidateId: string, questionId: string) {
+    const { version } = await this.paperContext(paperVersionId);
+    const item = version.items.find((i) => i.questionId === questionId);
+    if (!item) throw new BadRequestException('that question is not on this paper version');
+    if (item.question.type !== 'THEORY') throw new BadRequestException('only theory questions take a script answer');
+    const candidate = await this.prisma.candidate.findUnique({ where: { id: candidateId } });
+    if (!candidate || candidate.sessionId !== version.paper.sessionId) throw new NotFoundException('candidate not found for this session');
+  }
+
+  private async storeScan(paperVersionId: string, folder: string, tag: string, ext: string, data: Buffer) {
+    const dir = resolve(STORAGE_ROOT, paperVersionId, folder);
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, `${randomUUID()}_${tag}${ext}`);
+    await writeFile(path, data);
+    return path;
+  }
+
+  /**
+   * Creates or replaces the answer for one candidate and question, then queues
+   * it for reading. Within one bulk upload (same batchId) later pages are
+   * merged in page order instead of replacing the earlier ones.
+   */
+  private async putAnswer(p: {
     paperVersionId: string;
     candidateId: string;
     questionId: string;
+    pages: string[];
     uploadedBy: string;
-    file: Express.Multer.File;
+    batchId?: string;
   }) {
-    this.assertQueueHasRoom();
-    const item = await this.prisma.paperItem.findFirst({
-      where: { paperVersionId: params.paperVersionId, questionId: params.questionId },
-      include: { question: true },
-    });
-    if (!item) throw new BadRequestException('that question is not on this paper version');
-    if (item.question.type !== 'THEORY') throw new BadRequestException('only theory questions take a script answer');
-
-    const candidate = await this.prisma.candidate.findUnique({ where: { id: params.candidateId } });
-    if (!candidate) throw new NotFoundException('candidate not found');
-
-    const dir = resolve(STORAGE_ROOT, params.paperVersionId, params.candidateId);
-    await mkdir(dir, { recursive: true });
-    const ext = extname(params.file.originalname) || '.jpg';
-    const imagePath = join(dir, `${randomUUID()}_${params.questionId}${ext}`);
-    await writeFile(imagePath, params.file.buffer);
-
+    const key = { paperVersionId: p.paperVersionId, candidateId: p.candidateId, questionId: p.questionId };
+    const existing = await this.prisma.theoryScriptAnswer.findUnique({ where: { paperVersionId_candidateId_questionId: key } });
+    if (existing?.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be replaced');
+    let pages = p.pages;
+    if (p.batchId && existing?.uploadBatchId === p.batchId) {
+      const byNumber = new Map<number, string>();
+      for (const path of [...this.pagePaths(existing), ...p.pages]) byNumber.set(pageNumberOf(path), path);
+      pages = [...byNumber.entries()].sort(([a], [b]) => a - b).map(([, path]) => path);
+    }
+    const [imagePath, ...extraImagePaths] = pages;
+    // Re-uploading (e.g. a bad scan) resets the whole pipeline rather than
+    // leaving a stale AI score sitting next to a new image.
+    const fields = { imagePath, extraImagePaths, uploadedBy: p.uploadedBy, uploadBatchId: p.batchId ?? null };
     const answer = await this.prisma.theoryScriptAnswer.upsert({
-      where: {
-        paperVersionId_candidateId_questionId: {
-          paperVersionId: params.paperVersionId,
-          candidateId: params.candidateId,
-          questionId: params.questionId,
-        },
-      },
-      // Re-uploading (e.g. a bad scan) resets the whole pipeline rather than
-      // leaving a stale AI score sitting next to a new image.
-      update: {
-        imagePath,
-        uploadedBy: params.uploadedBy,
-        uploadedAt: new Date(),
-        status: 'UPLOADED',
-        transcribedText: null,
-        ocrModel: null,
-        ocrError: null,
-        aiScore: null,
-        aiMaxScore: null,
-        aiJustification: null,
-        aiModel: null,
-        aiError: null,
-        instructorScore: null,
-        instructorNotes: null,
-        reviewedBy: null,
-        reviewedAt: null,
-      },
-      create: {
-        paperVersionId: params.paperVersionId,
-        candidateId: params.candidateId,
-        questionId: params.questionId,
-        imagePath,
-        uploadedBy: params.uploadedBy,
-      },
+      where: { paperVersionId_candidateId_questionId: key },
+      update: { ...PIPELINE_RESET, ...fields, uploadedAt: new Date() },
+      create: { ...key, ...fields },
     });
-
     // OCR + marking take minutes on CPU, longer than the web proxy waits, so
     // the request returns now (status UPLOADED = "in the pipeline") and the
     // review screen polls. A failure at either step lands in *_FAILED with the
     // error attached, never a silent score.
-    this.enqueue(answer.id, () => this.runOcr(answer.id));
+    this.queue.add(this.ocrJob(answer.id));
+    return answer;
+  }
+
+  async upload(params: { paperVersionId: string; candidateId: string; questionId: string; uploadedBy: string; file: Express.Multer.File }) {
+    this.assertQueueHasRoom();
+    await this.checkTarget(params.paperVersionId, params.candidateId, params.questionId);
+    const ext = extname(params.file.originalname).toLowerCase() || '.jpg';
+    const path = await this.storeScan(params.paperVersionId, params.candidateId, params.questionId, ext, params.file.buffer);
+    const answer = await this.putAnswer({ ...params, pages: [path] });
     return this.get(answer.id);
   }
 
-  // One job at a time: a CPU-only Ollama thrashes if several models load at once.
-  private queue: Promise<unknown> = Promise.resolve();
+  /**
+   * Files a stack of scanned answer-sheet pages by the QR code printed on each
+   * one. Pages of the same answer are kept together in page order. Anything
+   * that can't be filed safely goes to the unassigned list for a person.
+   */
+  async bulkUpload(params: { paperVersionId: string; uploadedBy: string; files: Express.Multer.File[]; batchId?: string }): Promise<BulkResult> {
+    const { version, theory } = await this.paperContext(params.paperVersionId);
+    const theoryIds = new Set(theory.map((t) => t.questionId));
+    const candidates = new Map(
+      (await this.prisma.candidate.findMany({ where: { sessionId: version.paper.sessionId, active: true } })).map((c) => [c.id, c]),
+    );
 
-  private queuedJobs = 0;
-
-  private assertQueueHasRoom() {
-    if (this.queuedJobs >= MAX_QUEUED_AI_JOBS) {
-      throw new HttpException('The AI reader is busy. Wait for the current scripts to finish, then try again.', HttpStatus.TOO_MANY_REQUESTS);
+    const unassigned: { name: string; data: Buffer; reason: string }[] = [];
+    const groups = new Map<string, { code: SheetCode; pages: Map<number, Buffer> }>();
+    for (const file of params.files) {
+      if (!SCAN_FILE.test(file.originalname)) {
+        unassigned.push({ name: file.originalname, data: file.buffer, reason: 'Not a JPEG or PNG image' });
+        continue;
+      }
+      const read = await readSheetCode(file.buffer).catch(() => null);
+      const reason = !read
+        ? 'No answer-sheet code could be read on this page'
+        : read.code.paperVersionId !== params.paperVersionId
+          ? 'This page belongs to a different paper or version'
+          : !theoryIds.has(read.code.questionId)
+            ? 'The question on this page is not a theory question on this paper'
+            : !candidates.has(read.code.candidateId)
+              ? 'The candidate on this page is not an active candidate in this session'
+              : null;
+      if (!read || reason) {
+        unassigned.push({ name: file.originalname, data: read?.upright ?? file.buffer, reason: reason ?? 'Unreadable' });
+        continue;
+      }
+      const key = `${read.code.candidateId}|${read.code.questionId}`;
+      const group = groups.get(key) ?? { code: read.code, pages: new Map<number, Buffer>() };
+      if (group.pages.has(read.code.page)) {
+        unassigned.push({ name: file.originalname, data: read.upright, reason: `A second copy of page ${read.code.page} for the same candidate and question` });
+        continue;
+      }
+      group.pages.set(read.code.page, read.upright);
+      groups.set(key, group);
     }
-  }
 
-  private enqueue(id: string, job: () => Promise<unknown>) {
-    this.queuedJobs++;
-    this.queue = this.queue
-      .then(job)
-      .catch((err) => this.logger.error(`pipeline job for ${id} crashed: ${String(err)}`))
-      .finally(() => {
-        this.queuedJobs--;
+    this.assertQueueHasRoom(groups.size);
+    const published = new Set(
+      (
+        await this.prisma.theoryScriptAnswer.findMany({
+          where: { paperVersionId: params.paperVersionId, status: 'PUBLISHED' },
+          select: { candidateId: true, questionId: true },
+        })
+      ).map((a) => `${a.candidateId}|${a.questionId}`),
+    );
+
+    const result: BulkResult = { queued: [], unassigned: [] };
+    for (const [key, group] of groups) {
+      const { candidateId, questionId } = group.code;
+      const pages = [...group.pages.entries()].sort(([a], [b]) => a - b);
+      if (published.has(key)) {
+        for (const [n, data] of pages) {
+          unassigned.push({ name: `page ${n}`, data, reason: 'This result is already published, so the scan was not filed' });
+        }
+        continue;
+      }
+      const paths: string[] = [];
+      for (const [n, data] of pages) paths.push(await this.storeScan(params.paperVersionId, candidateId, `${questionId}_p${n}`, '.jpg', data));
+      await this.putAnswer({ paperVersionId: params.paperVersionId, candidateId, questionId, pages: paths, uploadedBy: params.uploadedBy, batchId: params.batchId });
+      const c = candidates.get(candidateId)!;
+      const q = theory.find((t) => t.questionId === questionId)!;
+      result.queued.push({ candidate: `${c.rank} ${c.fullName} (${c.armyNumber})`, question: `Q${q.position + 1}: ${q.question.topic}`, pages: pages.length });
+    }
+
+    for (const u of unassigned) {
+      const ext = extname(u.name).toLowerCase();
+      const path = await this.storeScan(params.paperVersionId, 'unassigned', 'scan', SCAN_FILE.test(ext) ? ext : '.jpg', u.data);
+      await this.prisma.unassignedScan.create({
+        data: { paperVersionId: params.paperVersionId, imagePath: path, originalName: u.name, reason: u.reason, uploadedBy: params.uploadedBy },
       });
+      result.unassigned.push({ file: u.name, reason: u.reason });
+    }
+    return result;
   }
 
-  /** Re-run from OCR or from marking in the background. */
-  async restart(id: string, from: 'ocr' | 'mark') {
+  listUnassigned(paperVersionId: string) {
+    return this.prisma.unassignedScan.findMany({ where: { paperVersionId }, orderBy: { uploadedAt: 'asc' } });
+  }
+
+  async getUnassigned(id: string) {
+    const scan = await this.prisma.unassignedScan.findUnique({ where: { id } });
+    if (!scan) throw new NotFoundException('scan not found');
+    return scan;
+  }
+
+  /** Files an unassigned page: as a new answer (replacing any earlier one), or as the next page of an existing answer. */
+  async assignScan(id: string, dto: { candidateId: string; questionId: string; append?: boolean }, actor: string) {
+    this.assertQueueHasRoom();
+    const scan = await this.getUnassigned(id);
+    await this.checkTarget(scan.paperVersionId, dto.candidateId, dto.questionId);
+    const key = { paperVersionId: scan.paperVersionId, candidateId: dto.candidateId, questionId: dto.questionId };
+    const existing = await this.prisma.theoryScriptAnswer.findUnique({ where: { paperVersionId_candidateId_questionId: key } });
+    let answerId: string;
+    if (dto.append && existing) {
+      if (existing.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be changed');
+      if (existing.extraImagePaths.length + 1 >= MAX_SHEET_PAGES) throw new BadRequestException(`an answer can have at most ${MAX_SHEET_PAGES} pages`);
+      await this.prisma.theoryScriptAnswer.update({
+        where: { id: existing.id },
+        data: { ...PIPELINE_RESET, extraImagePaths: [...existing.extraImagePaths, scan.imagePath], uploadedBy: actor, uploadedAt: new Date() },
+      });
+      this.queue.add(this.ocrJob(existing.id));
+      answerId = existing.id;
+    } else {
+      answerId = (await this.putAnswer({ ...key, pages: [scan.imagePath], uploadedBy: actor })).id;
+    }
+    await this.prisma.unassignedScan.delete({ where: { id } });
+    return this.get(answerId);
+  }
+
+  async discardUnassigned(id: string) {
+    const scan = await this.getUnassigned(id);
+    await this.prisma.unassignedScan.delete({ where: { id } });
+    await unlink(scan.imagePath).catch(() => undefined);
+    return { discarded: true };
+  }
+
+  /** Everything needed to print QR-coded answer sheets for every candidate and theory question. */
+  async answerSheets(paperVersionId: string, pagesPerQuestion: number) {
+    const pages = Math.min(MAX_SHEET_PAGES, Math.max(1, Math.floor(pagesPerQuestion) || 2));
+    const { version, theory } = await this.paperContext(paperVersionId);
+    const candidates = await this.prisma.candidate.findMany({
+      where: { sessionId: version.paper.sessionId, active: true },
+      orderBy: { armyNumber: 'asc' },
+    });
+    const schemes = await this.prisma.markingScheme.findMany({ where: { questionId: { in: theory.map((t) => t.questionId) } } });
+    const marks = new Map(schemes.map((s) => [s.questionId, s.totalMarks]));
+    return {
+      paperTitle: version.paper.title,
+      versionNumber: version.versionNumber,
+      examDate: version.examDate,
+      pagesPerQuestion: pages,
+      questions: theory.map((t) => ({ id: t.questionId, number: t.position + 1, topic: t.question.topic, body: t.question.body, marks: marks.get(t.questionId) ?? null })),
+      candidates: candidates.map((c) => ({
+        id: c.id,
+        armyNumber: c.armyNumber,
+        rank: c.rank,
+        fullName: c.fullName,
+        codes: Object.fromEntries(
+          theory.map((t) => [
+            t.questionId,
+            Array.from({ length: pages }, (_, i) => encodeSheetCode({ paperVersionId, candidateId: c.id, questionId: t.questionId, page: i + 1 })),
+          ]),
+        ),
+      })),
+    };
+  }
+
+  /** How close the AI's proposals have been to the marks instructors confirmed, per marking model. */
+  async agreement(paperVersionId?: string) {
+    const rows = await this.prisma.theoryScriptAnswer.findMany({
+      where: {
+        status: { in: ['REVIEWED', 'PUBLISHED'] },
+        aiScore: { not: null },
+        instructorScore: { not: null },
+        ...(paperVersionId ? { paperVersionId } : {}),
+      },
+      select: { aiModel: true, aiScore: true, instructorScore: true },
+    });
+    const byModel = new Map<string, number[]>();
+    for (const r of rows) {
+      const model = r.aiModel ?? 'unknown';
+      const diffs = byModel.get(model) ?? [];
+      diffs.push(Math.abs((r.aiScore ?? 0) - (r.instructorScore ?? 0)));
+      byModel.set(model, diffs);
+    }
+    return [...byModel.entries()].map(([model, diffs]) => ({
+      model,
+      scripts: diffs.length,
+      averageDifference: Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 10) / 10,
+      withinOneMarkPercent: Math.round((diffs.filter((d) => d <= 1).length / diffs.length) * 100),
+    }));
+  }
+
+  /** Re-run from OCR or from marking in the background. `deep` marks with the slower reasoning model. */
+  async restart(id: string, from: 'ocr' | 'mark', deep = false) {
     this.assertQueueHasRoom();
     const answer = await this.get(id);
     if (answer.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be re-run');
@@ -190,46 +442,58 @@ export class TheoryScriptsService {
         reviewedAt: null,
       },
     });
-    this.enqueue(id, () => (from === 'ocr' ? this.runOcr(id) : this.runMarking(id)));
+    this.queue.add(from === 'ocr' ? this.ocrJob(id) : this.markJob(id, deep));
     return this.get(id);
+  }
+
+  pagePaths(answer: { imagePath: string; extraImagePaths: string[] }) {
+    return [answer.imagePath, ...answer.extraImagePaths];
   }
 
   async runOcr(id: string) {
     const answer = await this.prisma.theoryScriptAnswer.findUniqueOrThrow({ where: { id } });
-    if (answer.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be re-run');
+    if (answer.status === 'PUBLISHED') return;
+    const pages = this.pagePaths(answer);
     try {
-      // A raw phone photo (~2000x2600) takes over 5 minutes just to ingest on
-      // CPU; downscaled it reads just as well. rotate() applies EXIF orientation.
-      const buffer = await sharp(await readFile(answer.imagePath))
-        .rotate()
-        .resize({ width: 1400, height: 1400, fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 88 })
-        .toBuffer();
-      const transcribedText = (
-        await this.ollama.generate({ model: OCR_MODEL, prompt: OCR_PROMPT, images: [buffer.toString('base64')] })
-      ).trim();
-      await this.prisma.theoryScriptAnswer.update({
-        where: { id },
-        data: { transcribedText, ocrModel: OCR_MODEL, ocrError: null },
+      const texts: string[] = [];
+      for (const path of pages) {
+        // A raw phone photo (~2000x2600) takes over 5 minutes just to ingest on
+        // CPU; downscaled it reads just as well. rotate() applies EXIF orientation.
+        const buffer = await sharp(await readFile(path))
+          .rotate()
+          .resize({ width: OCR_MAX_PX, height: OCR_MAX_PX, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 88 })
+          .toBuffer();
+        const text = (
+          await this.ollama.generate({ model: OCR_MODEL, prompt: OCR_PROMPT, images: [buffer.toString('base64')], keepAlive: KEEP_ALIVE })
+        ).trim();
+        // Candidates hand in unused continuation pages too; a blank page adds nothing.
+        if (text) texts.push(text);
+      }
+      const saved = await this.prisma.theoryScriptAnswer.updateMany({
+        where: { id, uploadedAt: answer.uploadedAt },
+        data: { transcribedText: texts.join('\n\n'), ocrModel: OCR_MODEL, ocrError: null },
       });
+      // A new scan replaced this one while it was being read; its own job will run.
+      if (!saved.count) return;
     } catch (err) {
       this.logger.error(`OCR failed for ${id}: ${String(err)}`);
-      await this.prisma.theoryScriptAnswer.update({
-        where: { id },
+      await this.prisma.theoryScriptAnswer.updateMany({
+        where: { id, uploadedAt: answer.uploadedAt },
         data: { status: 'OCR_FAILED' as ScriptAnswerStatus, ocrError: String(err) },
       });
-      return this.get(id);
+      return;
     }
-    return this.runMarking(id);
+    // Marking runs later as part of the marking batch, not straight away.
+    this.queue.add(this.markJob(id));
   }
 
-  async runMarking(id: string) {
+  async runMarking(id: string, model = MARKING_MODEL) {
     const answer = await this.prisma.theoryScriptAnswer.findUniqueOrThrow({
       where: { id },
       include: { question: { include: { markingScheme: { include: { conceptGroups: { orderBy: { order: 'asc' } } } } } } },
     });
-    if (answer.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be re-marked');
-    if (!answer.transcribedText) throw new BadRequestException('no transcription yet — run OCR first');
+    if (answer.status === 'PUBLISHED' || !answer.transcribedText) return;
 
     const scheme = answer.question.markingScheme;
     const totalMarks = scheme?.totalMarks ?? 10;
@@ -244,8 +508,13 @@ export class TheoryScriptsService {
       });
       // Ollama's format:'json' constrains decoding, which fights reasoning
       // models that need to think first; for those, extract the JSON instead.
-      const constrained = !/deepseek-r1|qwq/.test(MARKING_MODEL);
-      const raw = await this.ollama.generate({ model: MARKING_MODEL, prompt, json: constrained });
+      const raw = await this.ollama.generate({
+        model,
+        prompt,
+        json: !isReasoningModel(model),
+        think: thinkFlag(model),
+        keepAlive: KEEP_ALIVE,
+      });
       const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
       const parsed = JSON.parse(jsonText) as { score?: unknown; justification?: unknown };
       const score = typeof parsed.score === 'number' ? parsed.score : Number(parsed.score);
@@ -255,13 +524,14 @@ export class TheoryScriptsService {
         justification = `WARNING: this answer contains text that appears to instruct the marker (for example to ignore the rules or award a score). It was not followed. Check the scan carefully. ${justification}`;
       }
 
-      await this.prisma.theoryScriptAnswer.update({
-        where: { id },
+      // Only if the scan and transcript are still the ones that were marked.
+      await this.prisma.theoryScriptAnswer.updateMany({
+        where: { id, uploadedAt: answer.uploadedAt, transcribedText: answer.transcribedText },
         data: {
           aiScore: Math.max(0, Math.min(totalMarks, score)),
           aiMaxScore: totalMarks,
           aiJustification: justification,
-          aiModel: MARKING_MODEL,
+          aiModel: model,
           aiError: null,
           // A fresh AI mark invalidates any earlier human review of the old one.
           instructorScore: null,
@@ -273,12 +543,11 @@ export class TheoryScriptsService {
       });
     } catch (err) {
       this.logger.error(`AI marking failed for ${id}: ${String(err)}`);
-      await this.prisma.theoryScriptAnswer.update({
-        where: { id },
+      await this.prisma.theoryScriptAnswer.updateMany({
+        where: { id, uploadedAt: answer.uploadedAt },
         data: { status: 'AI_MARKING_FAILED' as ScriptAnswerStatus, aiError: String(err) },
       });
     }
-    return this.get(id);
   }
 
   async review(id: string, dto: { score: number; notes?: string }, reviewedBy: string) {

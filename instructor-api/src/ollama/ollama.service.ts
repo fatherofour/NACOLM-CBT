@@ -17,7 +17,14 @@ const noTimeouts = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 @Injectable()
 export class OllamaService {
   /** One-shot, non-streaming generation. `images` are base64 (no `data:` prefix). */
-  async generate(params: { model: string; prompt: string; images?: string[]; json?: boolean }): Promise<string> {
+  async generate(params: {
+    model: string;
+    prompt: string;
+    images?: string[];
+    json?: boolean;
+    think?: boolean;
+    keepAlive?: string;
+  }): Promise<string> {
     const res = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -26,6 +33,8 @@ export class OllamaService {
         prompt: params.prompt,
         images: params.images,
         format: params.json ? 'json' : undefined,
+        think: params.think,
+        keep_alive: params.keepAlive,
         // Streamed so response headers arrive immediately; a non-streaming
         // call on CPU-only hardware can exceed fetch's 5-minute headers timeout.
         stream: true,
@@ -52,5 +61,15 @@ export class OllamaService {
     }
     // Reasoning models (deepseek-r1, qwq) may inline their chain of thought.
     return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  }
+
+  /** Frees the model's memory now instead of after its keep-alive expires. */
+  async unload(model: string): Promise<void> {
+    await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, keep_alive: 0 }),
+      dispatcher: noTimeouts,
+    } as RequestInit);
   }
 }

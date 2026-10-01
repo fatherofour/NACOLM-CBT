@@ -221,6 +221,7 @@ model PaperVersion {
   items         PaperItem[]
   examPackage   ExamPackage?
   scriptAnswers TheoryScriptAnswer[]
+  unassignedScans UnassignedScan[]
 
   @@unique([paperId, versionNumber])
 }
@@ -292,7 +293,13 @@ model TheoryScriptAnswer {
   question       QuestionBankItem @relation(fields: [questionId], references: [id])
   questionId     String
 
-  imagePath       String // uploaded scan of this candidate's answer to this question
+  imagePath       String // uploaded scan of this candidate's answer to this question (page 1)
+  // Pages 2..n of a multi-page answer, in order. OCR reads them all and joins
+  // the text, so the marker sees the whole answer.
+  extraImagePaths String[] @default([])
+  // Set by bulk upload: pages arriving in later chunks of the same upload are
+  // merged into this answer instead of replacing it.
+  uploadBatchId   String?
   uploadedBy      String
   uploadedAt      DateTime @default(now())
 
@@ -315,6 +322,19 @@ model TheoryScriptAnswer {
   updatedAt DateTime           @updatedAt
 
   @@unique([paperVersionId, candidateId, questionId])
+}
+
+// A bulk-uploaded page whose answer-sheet QR code couldn't be read or didn't
+// match this paper. It waits here until a person says whose answer it is.
+model UnassignedScan {
+  id             String       @id @default(cuid())
+  paperVersion   PaperVersion @relation(fields: [paperVersionId], references: [id])
+  paperVersionId String
+  imagePath      String
+  originalName   String
+  reason         String
+  uploadedBy     String
+  uploadedAt     DateTime     @default(now())
 }
 
 // Every mutating action on a question (approve / edit / reject) writes one of

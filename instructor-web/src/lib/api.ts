@@ -136,6 +136,7 @@ export interface ScriptAnswer {
   candidateId: string;
   questionId: string;
   imagePath: string;
+  extraImagePaths: string[];
   uploadedBy: string;
   uploadedAt: string;
   transcribedText: string | null;
@@ -154,6 +155,45 @@ export interface ScriptAnswer {
   updatedAt: string;
   candidate: Candidate;
   question: { id: string; topic: string; body: string };
+}
+
+export interface ScriptQueue {
+  running: { id: string; stage: 'ocr' | 'mark'; model: string; startedAt: string } | null;
+  waiting: { ocr: number; mark: number };
+  etaSeconds: number;
+  ocrModel: string;
+  markingModel: string;
+  deepMarkingModel: string;
+}
+
+export interface BulkUploadResult {
+  queued: { candidate: string; question: string; pages: number }[];
+  unassigned: { file: string; reason: string }[];
+}
+
+export interface UnassignedScan {
+  id: string;
+  paperVersionId: string;
+  originalName: string;
+  reason: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface MarkerAgreement {
+  model: string;
+  scripts: number;
+  averageDifference: number;
+  withinOneMarkPercent: number;
+}
+
+export interface AnswerSheetData {
+  paperTitle: string;
+  versionNumber: number;
+  examDate: string;
+  pagesPerQuestion: number;
+  questions: { id: string; number: number; topic: string; body: string; marks: number | null }[];
+  candidates: { id: string; armyNumber: string; rank: string; fullName: string; codes: Record<string, string[]> }[];
 }
 
 export function downloadCsv(filename: string, csv: string) {

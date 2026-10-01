@@ -21,10 +21,10 @@ flowchart TD
   H --> I["Add candidates and issue PINs"]
   I --> J["Exam officer publishes the paper and builds the package"]
   J --> K["Exam runs at the venue; objective questions marked automatically"]
-  K --> L["Theory answers written on paper"]
-  L --> M["Scan each answer and upload it for the candidate and question"]
+  K --> L["Theory answers written on QR-coded answer sheets"]
+  L --> M["Scan all pages and upload them in one go; each page is filed by its code"]
   M --> N["Local vision model reads the handwriting"]
-  N --> O["deepseek-r1 proposes a score with a reason"]
+  N --> O["Local marker proposes a score with a reason"]
   O --> P{"Compare the scan with what was read"}
   P -->|Accept or change the score| Q["Confirm the mark"]
   P -->|Reading looks wrong| M
@@ -43,9 +43,9 @@ flowchart TD
   class J hand
 ```
 
-- **The AI never decides.** The deepseek-r1 score is pre-filled, but the instructor's confirmed score is the one recorded. Re-running the AI clears any earlier confirmation.
-- **Reading takes a few minutes.** Scans are processed in the background, one at a time, on local models. The list refreshes itself while a script is being read.
-- **One image per answer.** Each upload is one candidate's answer to one theory question, as a JPEG or PNG. Whole-booklet scans are not split automatically yet.
+- **The AI never decides.** The proposed score (qwen3:4b) is pre-filled, but the instructor's confirmed score is the one recorded. Re-running the AI clears any earlier confirmation. A slower second opinion from deepseek-r1 is one click away.
+- **Bulk marking runs in the background.** Every waiting script is read first, then all are marked, so each model loads once. On the current server that is about 3 minutes per answer; the page shows how many are waiting and roughly when it will finish.
+- **QR-coded answer sheets.** Print them from the Theory scripts page: one sheet per candidate, question and page, each with a code. Upload the scanned pages in any order; pages of the same answer are kept together and turned upright. Pages without a readable code wait in a list for a person to file.
 - **Answers are treated as data.** Text in a scan that tries to instruct the marker is ignored, and the review screen shows a warning on the justification.
 
 ## Admin: setting the system up and keeping it running

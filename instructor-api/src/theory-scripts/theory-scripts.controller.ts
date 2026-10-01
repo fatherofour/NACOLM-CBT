@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Logger,
   Param,
@@ -10,14 +11,18 @@ import {
   Query,
   StreamableFile,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { readFile } from 'node:fs/promises';
 import { TheoryScriptsService } from './theory-scripts.service.js';
 import { ReviewScriptAnswerDto } from './dto/review-script-answer.dto.js';
+import { AssignScanDto } from './dto/assign-scan.dto.js';
 import { CurrentUser, Roles, actorName, type SessionUser } from '../auth/decorators.js';
 import type { ScriptAnswerStatus } from '../generated/prisma/enums.js';
+
+const imageType = (path: string) => (/\.png$/i.test(path) ? 'image/png' : 'image/jpeg');
 
 // This controller drives the local AI models, so it is limited to staff roles
 // explicitly rather than "any signed-in user": a role added later gets no AI
@@ -49,6 +54,21 @@ export class TheoryScriptsController {
     return this.scripts.upload({ paperVersionId, candidateId, questionId, uploadedBy: actorName(user), file });
   }
 
+  @Post('bulk')
+  @UseInterceptors(FilesInterceptor('files', 150, { limits: { fileSize: 20 * 1024 * 1024, files: 150 } }))
+  async bulk(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body('paperVersionId') paperVersionId: string,
+    @Body('batchId') batchId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (batchId && !/^[A-Za-z0-9-]{8,64}$/.test(batchId)) throw new BadRequestException('invalid batchId');
+    if (!files?.length) throw new BadRequestException('attach at least one scanned page');
+    if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
+    this.logger.log(`AI pipeline: bulk upload of ${files.length} page(s) by ${actorName(user)} for paper version ${paperVersionId}`);
+    return this.scripts.bulkUpload({ paperVersionId, uploadedBy: actorName(user), files, batchId });
+  }
+
   @Get()
   list(
     @Query('paperVersionId') paperVersionId?: string,
@@ -59,18 +79,57 @@ export class TheoryScriptsController {
     return this.scripts.list({ paperVersionId, candidateId, status });
   }
 
+  @Get('queue')
+  queue() {
+    return this.scripts.queueStatus();
+  }
+
+  @Get('agreement')
+  agreement(@Query('paperVersionId') paperVersionId?: string) {
+    return this.scripts.agreement(paperVersionId);
+  }
+
+  @Get('answer-sheets')
+  answerSheets(@Query('paperVersionId') paperVersionId: string, @Query('pages') pages?: string) {
+    if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
+    return this.scripts.answerSheets(paperVersionId, Number(pages ?? 2));
+  }
+
+  @Get('unassigned')
+  unassigned(@Query('paperVersionId') paperVersionId: string) {
+    if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
+    return this.scripts.listUnassigned(paperVersionId);
+  }
+
+  @Get('unassigned/:id/image')
+  async unassignedImage(@Param('id') id: string): Promise<StreamableFile> {
+    const scan = await this.scripts.getUnassigned(id);
+    return new StreamableFile(await readFile(scan.imagePath), { type: imageType(scan.imagePath) });
+  }
+
+  @Post('unassigned/:id/assign')
+  assign(@Param('id') id: string, @Body() dto: AssignScanDto, @CurrentUser() user: SessionUser) {
+    this.logger.log(`AI pipeline: unassigned scan ${id} filed by ${actorName(user)}`);
+    return this.scripts.assignScan(id, dto, actorName(user));
+  }
+
+  @Delete('unassigned/:id')
+  discard(@Param('id') id: string) {
+    return this.scripts.discardUnassigned(id);
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.scripts.get(id);
   }
 
   // So a reviewer can see the actual scan next to the transcription/score,
-  // not just trust the OCR blindly.
+  // not just trust the OCR blindly. `page` is 1-based.
   @Get(':id/image')
-  async image(@Param('id') id: string): Promise<StreamableFile> {
-    const answer = await this.scripts.get(id);
-    const type = /\.png$/i.test(answer.imagePath) ? 'image/png' : 'image/jpeg';
-    return new StreamableFile(await readFile(answer.imagePath), { type });
+  async image(@Param('id') id: string, @Query('page') page?: string): Promise<StreamableFile> {
+    const pages = this.scripts.pagePaths(await this.scripts.get(id));
+    const path = pages[Math.max(0, Math.min(pages.length - 1, Number(page ?? 1) - 1 || 0))];
+    return new StreamableFile(await readFile(path), { type: imageType(path) });
   }
 
   @Post(':id/ocr')
@@ -80,9 +139,10 @@ export class TheoryScriptsController {
   }
 
   @Post(':id/mark')
-  retryMarking(@Param('id') id: string, @CurrentUser() user: SessionUser) {
-    this.logger.log(`AI pipeline: marking re-run on ${id} by ${actorName(user)}`);
-    return this.scripts.restart(id, 'mark');
+  retryMarking(@Param('id') id: string, @Body('deep') deep: unknown, @CurrentUser() user: SessionUser) {
+    const second = deep === true;
+    this.logger.log(`AI pipeline: ${second ? 'second-opinion ' : ''}marking re-run on ${id} by ${actorName(user)}`);
+    return this.scripts.restart(id, 'mark', second);
   }
 
   @Patch(':id/review')
@@ -91,7 +151,6 @@ export class TheoryScriptsController {
   }
 
   @Post('publish')
-  @Roles('INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN')
   publish(@Query('paperVersionId') paperVersionId: string) {
     if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
     return this.scripts.publish(paperVersionId);
