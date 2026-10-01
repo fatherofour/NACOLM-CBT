@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -108,7 +109,16 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	// A room of kiosks saves answers at the same moment. SQLite allows one
+	// writer at a time, so writers must wait their turn (busy_timeout)
+	// rather than fail with "database is locked"; WAL lets reads carry on
+	// during a write; immediate transactions take the write lock up front
+	// instead of failing when a read upgrades to a write.
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	db, err := sql.Open("sqlite", path+sep+"_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db: %w", err)
 	}

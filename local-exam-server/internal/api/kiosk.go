@@ -38,11 +38,14 @@ const (
 )
 
 type kioskState struct {
-	mu       sync.Mutex
-	roster   *roster.Roster
-	tokens   map[string]string // token -> service number
-	failures map[string]*failure
-	now      func() time.Time
+	mu        sync.Mutex
+	roster    *roster.Roster
+	tokens    map[string]string    // token -> service number
+	presence  map[string]*presence // service number -> current sign-in (see integrity.go)
+	lastEvent map[string]time.Time // "service number|kind" -> last recorded
+	lastLeave map[string]time.Time // service number -> last counted leave-the-screen event
+	failures  map[string]*failure
+	now       func() time.Time
 }
 
 type failure struct {
@@ -51,7 +54,10 @@ type failure struct {
 }
 
 func newKioskState() *kioskState {
-	return &kioskState{tokens: map[string]string{}, failures: map[string]*failure{}, now: time.Now}
+	return &kioskState{
+		tokens: map[string]string{}, presence: map[string]*presence{}, lastEvent: map[string]time.Time{},
+		lastLeave: map[string]time.Time{}, failures: map[string]*failure{}, now: time.Now,
+	}
 }
 
 // SetRoster installs the venue's candidate list. Without one, kiosk sign-in
@@ -65,18 +71,20 @@ func (s *Server) SetRoster(r *roster.Roster) {
 func (s *Server) registerKiosk(mux *http.ServeMux) {
 	web, _ := fs.Sub(kioskFiles, "kiosk")
 	files := http.FileServer(http.FS(web))
-	mux.Handle("GET /kiosk/", withKioskHeaders(http.StripPrefix("/kiosk/", files)))
+	route := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.requireSEB(h)) }
+	mux.Handle("GET /kiosk/", s.requireSEB(withKioskHeaders(http.StripPrefix("/kiosk/", files))))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/kiosk/"+queryString(r), http.StatusFound)
 	})
-	mux.HandleFunc("GET /kiosk/api/status", s.kioskStatus)
-	mux.HandleFunc("POST /kiosk/api/login", s.kioskLogin)
-	mux.HandleFunc("POST /kiosk/api/logout", s.kioskLogout)
-	mux.HandleFunc("GET /kiosk/api/me", s.withCandidate(s.kioskMe))
-	mux.HandleFunc("POST /kiosk/api/start", s.withCandidate(s.kioskStart))
-	mux.HandleFunc("PUT /kiosk/api/answer", s.withCandidate(s.kioskAnswer))
-	mux.HandleFunc("POST /kiosk/api/submit", s.withCandidate(s.kioskSubmit))
-	mux.HandleFunc("POST /kiosk/api/violation", s.withCandidate(s.kioskViolation))
+	route("GET /kiosk/api/status", s.kioskStatus)
+	route("POST /kiosk/api/login", s.kioskLogin)
+	route("POST /kiosk/api/logout", s.kioskLogout)
+	route("GET /kiosk/api/me", s.withCandidate(s.kioskMe))
+	route("POST /kiosk/api/start", s.withCandidate(s.kioskStart))
+	route("PUT /kiosk/api/answer", s.withCandidate(s.kioskAnswer))
+	route("POST /kiosk/api/submit", s.withCandidate(s.kioskSubmit))
+	route("POST /kiosk/api/violation", s.withCandidate(s.kioskViolation))
+	route("POST /kiosk/api/heartbeat", s.withCandidate(s.kioskHeartbeat))
 }
 
 func queryString(r *http.Request) string {
@@ -108,12 +116,22 @@ func (s *Server) withCandidate(h candidateHandler) http.HandlerFunc {
 			writeError(w, http.StatusUnauthorized, "sign in to continue")
 			return
 		}
-		s.kiosk.mu.Lock()
-		svc, ok := s.kiosk.tokens[cookie.Value]
-		rs := s.kiosk.roster
-		s.kiosk.mu.Unlock()
+		k := s.kiosk
+		k.mu.Lock()
+		svc, ok := k.tokens[cookie.Value]
+		rs := k.roster
+		p := k.presence[svc]
+		replaced := ok && (p == nil || p.token != cookie.Value)
+		if ok && !replaced {
+			p.lastSeen = k.now()
+		}
+		k.mu.Unlock()
 		if !ok || rs == nil {
 			writeError(w, http.StatusUnauthorized, "sign in to continue")
+			return
+		}
+		if replaced {
+			writeError(w, http.StatusUnauthorized, "You were signed in on another computer, so this one was signed out. Raise your hand for the invigilator.")
 			return
 		}
 		c, ok := rs.Get(svc)
@@ -130,7 +148,7 @@ func (s *Server) kioskStatus(w http.ResponseWriter, r *http.Request) {
 	s.kiosk.mu.Lock()
 	loaded := s.kiosk.roster != nil
 	s.kiosk.mu.Unlock()
-	resp := map[string]any{"centre": s.cfg.CentreName, "released": released, "roster_loaded": loaded}
+	resp := map[string]any{"centre": s.cfg.CentreName, "released": released, "roster_loaded": loaded, "lock_after": s.cfg.LockAfter}
 	if released {
 		resp["title"] = pkg.Title
 	}
@@ -140,6 +158,7 @@ func (s *Server) kioskStatus(w http.ResponseWriter, r *http.Request) {
 type loginRequest struct {
 	ServiceNumber string `json:"service_number"`
 	PIN           string `json:"pin"`
+	Seat          string `json:"seat"` // the computer's label from ?seat= in the kiosk URL
 }
 
 func (s *Server) kioskLogin(w http.ResponseWriter, r *http.Request) {
@@ -182,11 +201,32 @@ func (s *Server) kioskLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	seat := ""
+	if safeSeat.MatchString(req.Seat) {
+		seat = req.Seat
+	}
+	ip := clientIP(r)
 	token := randomHex(32)
 	k.mu.Lock()
 	delete(k.failures, key)
+	now := k.now()
+	prev := k.presence[c.ServiceNumber]
+	sameComputer := prev != nil && prev.seat == seat && prev.ip == ip
+	if prev != nil && !prev.allowMove && !sameComputer && now.Sub(prev.lastSeen) < activeWindow {
+		k.mu.Unlock()
+		// Shown as a flag to the invigilator but not counted towards pausing:
+		// it may be someone else trying this candidate's details.
+		s.event(c.ServiceNumber, "concurrent_login_blocked", "from "+where(seat, ip)+" while signed in at "+where(prev.seat, prev.ip), false)
+		writeError(w, http.StatusConflict, "You are already signed in on another computer. Raise your hand for the invigilator.")
+		return
+	}
 	k.tokens[token] = c.ServiceNumber
+	k.presence[c.ServiceNumber] = &presence{token: token, seat: seat, ip: ip, lastSeen: now}
 	k.mu.Unlock()
+	if prev != nil && !sameComputer {
+		s.event(c.ServiceNumber, "session_moved", "from "+where(prev.seat, prev.ip)+" to "+where(seat, ip), false)
+	}
+	s.event(c.ServiceNumber, "signed_in", where(seat, ip), false)
 
 	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: token, Path: "/kiosk", HttpOnly: true, Secure: s.cfg.TLSEnabled(), SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"candidate": c})
@@ -194,9 +234,15 @@ func (s *Server) kioskLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) kioskLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(kioskCookie); err == nil {
-		s.kiosk.mu.Lock()
-		delete(s.kiosk.tokens, cookie.Value)
-		s.kiosk.mu.Unlock()
+		k := s.kiosk
+		k.mu.Lock()
+		if svc, ok := k.tokens[cookie.Value]; ok {
+			if p := k.presence[svc]; p != nil && p.token == cookie.Value {
+				delete(k.presence, svc)
+			}
+		}
+		delete(k.tokens, cookie.Value)
+		k.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{Name: kioskCookie, Value: "", Path: "/kiosk", MaxAge: -1, HttpOnly: true, Secure: s.cfg.TLSEnabled(), SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]any{"signed_out": true})
@@ -252,6 +298,9 @@ func (s *Server) kioskMe(w http.ResponseWriter, r *http.Request, c roster.Candid
 		}
 		resp["paper"] = metaFor(pkg)
 		resp["session"] = sessionView{Started: st.StartedAt != nil, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference, ResponseHash: st.ResponseHash}
+		if v, err := s.integrityFor(c.ServiceNumber); err == nil {
+			resp["integrity"] = v
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -299,11 +348,17 @@ func (s *Server) kioskStart(w http.ResponseWriter, r *http.Request, c roster.Can
 		writeError(w, http.StatusInternalServerError, "failed to load answers")
 		return
 	}
+	integrity, err := s.integrityFor(c.ServiceNumber)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load integrity state")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"paper":      metaFor(pkg),
 		"questions":  questions,
 		"answers":    answers,
 		"session":    sessionView{Started: true, Deadline: st.DeadlineAt, SubmittedAt: st.SubmittedAt, Reference: st.Reference, ResponseHash: st.ResponseHash},
+		"integrity":  integrity,
 		"server_now": time.Now().UTC(),
 	})
 }
@@ -351,6 +406,13 @@ func (s *Server) kioskAnswer(w http.ResponseWriter, r *http.Request, c roster.Ca
 		writeError(w, status, msg)
 		return
 	}
+	if ls, err := s.store.GetLock(pkg.ExamID, c.ServiceNumber); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load session")
+		return
+	} else if ls.LockedAt != nil {
+		writeJSON(w, http.StatusLocked, map[string]any{"error": "Your exam is paused. The invigilator must unlock this computer.", "locked": true})
+		return
+	}
 	paper, err := s.store.LoadCandidatePaper(pkg.ExamID, c.ServiceNumber)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load paper")
@@ -380,38 +442,6 @@ func (s *Server) kioskAnswer(w http.ResponseWriter, r *http.Request, c roster.Ca
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"saved": true, "position": req.Position})
-}
-
-// violationKinds are the only events app.js reports — anything else is
-// rejected rather than silently stored, so this table can't fill up with
-// arbitrary client-supplied strings.
-var violationKinds = map[string]bool{"tab_hidden": true, "window_blur": true, "fullscreen_exit": true}
-
-type violationRequest struct {
-	Kind string `json:"kind"`
-}
-
-// kioskViolation logs a browser-side integrity signal — a hidden tab, a
-// lost window focus, or leaving fullscreen. It never blocks or fails the
-// candidate's exam: a browser can only ever detect and record these, not
-// truly prevent them (see README.md). The invigilator console surfaces the
-// running count per candidate so a human in the room decides what to do.
-func (s *Server) kioskViolation(w http.ResponseWriter, r *http.Request, c roster.Candidate) {
-	pkg, _, released := s.isReleased()
-	if !released {
-		writeJSON(w, http.StatusOK, map[string]any{"recorded": false})
-		return
-	}
-	var req violationRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256)).Decode(&req); err != nil || !violationKinds[req.Kind] {
-		writeError(w, http.StatusBadRequest, "invalid violation kind")
-		return
-	}
-	if err := s.store.RecordViolation(pkg.ExamID, c.ServiceNumber, req.Kind, time.Now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"recorded": true})
 }
 
 func (s *Server) kioskSubmit(w http.ResponseWriter, r *http.Request, c roster.Candidate) {
@@ -460,7 +490,7 @@ func (s *Server) kioskSubmit(w http.ResponseWriter, r *http.Request, c roster.Ca
 		"reference":     st.Reference,
 		"response_hash": st.ResponseHash,
 		"publish_mode":  pkg.PublishMode,
-		"theory":       theory,
+		"theory":        theory,
 	}
 	if pkg.PublishMode == "immediate" {
 		resp["objective_correct"] = correct

@@ -27,7 +27,7 @@ var kioskColumns = []string{
 }
 
 func (s *Store) migrateKiosk() error {
-	for _, stmt := range kioskColumns {
+	for _, stmt := range append(kioskColumns, integrityColumns...) {
 		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 			return err
 		}

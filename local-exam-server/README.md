@@ -51,8 +51,8 @@ For a larger venue, running the server on its own machine and putting the
 invigilator console on a second monitor there works exactly the same way —
 nothing about the server cares which physical box it's on.
 
-The server starts air-gapped-safe: `/checkin` and `/submit` are refused
-with `423 Locked` until `/release` is called with the AES key (hex-encoded).
+The server starts air-gapped-safe: candidates can sign in but can't start
+(`423 Locked`) until `/release` is called with the AES key (hex-encoded).
 That call is the runtime equivalent of the invigilator triggering the
 release key at the scheduled exam start time — the key is never read from
 disk alongside the package.
@@ -76,20 +76,31 @@ cookie automatically gets the `Secure` flag once TLS is on.
 
 ## Invigilator console
 
-Releasing the paper and watching who's signed in is done at
+Releasing the paper and watching the room is done at
 `http://<exam-server>:8080/invigilator/` (`internal/api/invigilator/`, same
-embedded-static-files pattern as the kiosk) — there is no separate login,
-since whoever has the release key already has the authority the rest of the
-system assumes they have.
+embedded-static-files pattern as the kiosk). Access is by the release key:
+whoever has it already has the authority the rest of the system assumes.
 
-- **Before release:** a form to paste the release key (hex) handed down by
-  the exam officer and press **Open exam**. This calls the same `/release`
-  endpoint the API exposes directly, so scripting the release (e.g. from a
-  timed job) still works.
-- **After release:** a live table of every roster candidate and their
-  progress — not checked in / checked in / started / submitted, with the
-  submission reference — refreshing every 5 seconds, so the invigilator can
-  see who hasn't sat down yet without walking the room.
+- **Before release:** paste the release key (hex) handed down by the exam
+  officer and press **Open exam**. That browser is then signed in to the
+  console. Scripting the release with `POST /release` still works.
+- **A second console** (another invigilator, another PC) signs in with the
+  same key. Without a console session the roster, incident log and actions
+  are refused, so a candidate on the LAN can't read or use them.
+- **The roster** refreshes every 5 seconds: progress (not checked in /
+  checked in / started / submitted), the computer each candidate is on,
+  whether that computer is still in touch (online, or offline since when),
+  integrity **flags**, and a **Paused** badge.
+- **Open a candidate** to see the timeline of everything recorded for them,
+  and to act:
+  - **Unlock** a paused exam. Their computer resumes within seconds and
+    they get a fresh allowance of warnings.
+  - **Allow sign-in on another computer**, e.g. after a hardware fault.
+  - **Give extra time** (1 to 120 minutes) with a reason, which is recorded.
+    The candidate's timer updates within seconds.
+- **Download incident log (CSV):** every event for the sitting with time,
+  candidate, event, detail and whether it counted towards a pause, for the
+  exam record.
 - If `CBT_ROSTER_PATH` isn't set, the console says so plainly instead of
   silently showing an empty room.
 
@@ -121,25 +132,68 @@ chromium --kiosk "http://<exam-server>:8080/kiosk/?seat=A-14"
   otherwise they're told results come from the instructor.
 - The paper sent to the kiosk never includes correct answers or model
   answers.
-- **Browser lockdown controls**, honestly scoped — a web page can detect and
-  discourage, but never truly *prevent*, someone switching tabs or closing a
-  window; there's no browser API for that. True lockdown needs a native
-  kiosk browser or OS-level tooling, which is out of scope here. What the
-  kiosk actually does:
-  - Blocks right-click, copy, cut, paste and drag-drop during the exam, and
-    sends a strict Content-Security-Policy.
-  - Requests full-screen when the candidate presses Start, and shows a
-    "return to full screen" prompt (with a reminder that it's recorded) if
-    they leave it.
-  - `beforeunload` triggers the browser's own native "leave this page?"
-    confirmation if the candidate tries to close or navigate away.
-  - Detects the tab being hidden or the window losing focus and reports it
-    to the server as it happens.
-  - Every one of those detections is logged per candidate
-    (`POST /kiosk/api/violation`, `internal/store/violations.go`) and shown
-    as a **Flags** count on the invigilator console's roster table — the
-    point isn't to silently collect evidence, it's to put an actionable
-    signal in front of the person actually in the room.
+- **Integrity controls:** see [Exam integrity](#exam-integrity) below.
+
+## Exam integrity
+
+A web page can detect and discourage, but never truly *prevent*, someone
+switching windows: browsers reserve those keys. So there are two layers:
+
+1. **Lock the computer down** with [Safe Exam Browser](#safe-exam-browser)
+   (recommended) or the browser's kiosk mode. That removes the address bar,
+   other applications, task switching and screenshots.
+2. **Detect, record and respond** in the kiosk itself, which works in any
+   browser and still matters under SEB (a second display, a sign-in from
+   another computer, an auto-typing tool).
+
+What the kiosk and server do:
+
+| Control | How |
+|---|---|
+| One candidate, one computer | A second sign-in while the first computer is active is refused and flagged. Signing in again on the same computer (a browser restart) is fine; so is moving after the old computer has been silent for 90 seconds, or when the invigilator allows it. |
+| Copying content out | Right-click, copy, cut, text selection outside the answer box and dragging are blocked. Printing is blocked and replaced with a notice. Print Screen is recorded and the clipboard overwritten where the browser allows. |
+| Bringing content in | Paste and drop are blocked and recorded. A large block of text appearing in one go (an auto-typing tool, an extension) is recorded. Autocomplete and spellcheck are off. |
+| Shortcuts | Save, print, find, view source, developer tools, reload, history, address bar and back/forward are blocked and recorded. |
+| Leaving the exam | Full screen on Start, with a prompt and a record if they leave it. Losing focus or the tab being hidden is recorded. The browser's own "leave this page?" prompt guards closing. |
+| Second display | Detected where the browser exposes it (Chrome, Edge); shown to the candidate and recorded. |
+| Photos of the screen | The candidate's service number, name and computer are watermarked faintly across the exam. |
+| Pause after warnings | After `CBT_LOCK_AFTER` counted warnings (default 5; `0` turns it off) the exam pauses until the invigilator unlocks it. The clock keeps running. Leaving the window fires several events together; within 3 seconds they count once. |
+| Liveness | The kiosk checks in every 10 seconds, so the console shows a computer that has gone quiet. |
+| Timing | Server-side deadline; extra time only by the invigilator, with a reason. |
+| Tamper resistance | All decisions (pause, unlock, deadline, sign-in) are made by the server; editing the page can stop reports but can't unpause or add time. Answers lock at submit (SQLite triggers) and are hashed. |
+| Record | Every event is stored with time and detail and downloadable as CSV from the console. |
+
+Events are evidence for the invigilator's judgement, not proof of
+malpractice on their own: a window can lose focus for innocent reasons.
+
+### Safe Exam Browser
+
+[Safe Exam Browser](https://safeexambrowser.org) (SEB) is the open-source
+lockdown browser widely used for this. Create an exam configuration in the
+SEB Config Tool:
+
+- **Start URL:** `http://<exam-server>:8080/kiosk/?seat=<computer>` (one
+  config per computer, or set the seat label on each machine).
+- **Allowed URLs:** only the exam server.
+- **Security:** disallow quitting without the quit password, block
+  screen capture and screen sharing, block virtual machines, enable
+  "Send Browser Exam Key and Config Key" in the request headers.
+- Copy the **Config Key** (or the Browser Exam Key) shown in the tool.
+
+Then start the server with:
+
+```
+CBT_SEB_CONFIG_KEYS=<config key>[,<another>]      # or CBT_SEB_BROWSER_EXAM_KEYS=...
+```
+
+Every kiosk request must then carry SEB's hash of that key and the exact
+URL; anything else gets "Safe Exam Browser required". `CBT_REQUIRE_SEB=true`
+without keys only checks SEB's user agent, which anyone can fake, so use
+keys for a real sitting. The invigilator console is not behind SEB.
+
+If SEB isn't available, run each computer's browser in kiosk mode under a
+locked-down exam user account:
+`msedge --kiosk "http://<exam-server>:8080/kiosk/?seat=A-14" --edge-kiosk-type=fullscreen`.
 
 ### Roster CSV
 
@@ -161,24 +215,38 @@ sign in as, and the `curl` that opens the paper.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/status` | centre name, whether the paper is open |
-| POST | `/login` | `{"service_number","pin"}` → httpOnly session cookie |
+| GET | `/status` | centre name, whether the paper is open, the pause threshold |
+| POST | `/login` | `{"service_number","pin","seat"}` → httpOnly session cookie |
 | POST | `/logout` | end the kiosk session |
-| GET | `/me` | candidate, paper details, whether started/submitted |
+| GET | `/me` | candidate, paper details, whether started/submitted, integrity state |
 | POST | `/start` | draw the paper if needed, start the clock once, return questions + saved answers + deadline |
-| PUT | `/answer` | `{"position","selected_index"}` or `{"position","answer_text"}` |
+| PUT | `/answer` | `{"position","selected_index"}` or `{"position","answer_text"}`; `423` while paused |
+| POST | `/violation` | `{"kind","detail"}`: an integrity event; returns the warning count and whether the exam is now paused |
+| POST | `/heartbeat` | keeps the computer online on the console; returns deadline and pause state |
 | POST | `/submit` | close the paper, mark objective answers, return the result the candidate may see |
 
-### Endpoints
+### Invigilator endpoints (`/invigilator/api/…`)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/kiosk/` | the candidate kiosk (see above) |
+| GET | `/status` | centre, whether released, whether this browser is signed in |
+| POST | `/release` | `{"key_hex"}`: open the exam; signs this browser in |
+| POST | `/login` | `{"key_hex"}`: sign another console in after release |
+| GET | `/candidates` | roster with progress, computer, online, flags, pause (signed in) |
+| GET | `/events?candidate=` | one candidate's timeline (signed in) |
+| POST | `/unlock`, `/allow-move` | `{"service_number"}` (signed in) |
+| POST | `/extend` | `{"service_number","minutes","reason"}` (signed in) |
+| GET | `/incidents.csv` | the sitting's incident log (signed in) |
+
+### Other endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
 | GET | `/health` | liveness + whether the exam has been released |
-| POST | `/release` | `{"key_hex": "..."}` — decrypts the package, unlocks check-in |
-| POST | `/checkin` | `{"candidate_id": "..."}` — draws and persists that candidate's randomized paper |
-| GET | `/paper?candidate_id=...` | re-fetch a candidate's paper (e.g. after a kiosk restart) |
-| POST | `/submit` | records responses, auto-marks MCQ locally, respects `publish_mode` |
+| POST | `/release` | `{"key_hex": "..."}`: decrypts the package (for scripted release) |
+
+The earlier id-only `/checkin`, `/paper` and `/submit` endpoints are gone:
+they let any device on the LAN read or submit any candidate's paper.
 
 ## Randomization (`internal/randomize`)
 
@@ -228,8 +296,9 @@ not to auto-finalize like objective questions do.
 Implemented: package decryption (interop-tested against Python), the
 stratified/exposure-controlled/salted randomization engine above, the
 keyword theory-marking engine, SQLite persistence, a working check-in →
-answer → submit → auto-mark HTTP flow, the invigilator console for release +
-live candidate status, TLS on the LAN listener, and DB-enforced immutability
+answer → submit → auto-mark kiosk flow, the invigilator console (release,
+live status, unlock, extra time, incident log), the exam integrity controls
+and Safe Exam Browser check, TLS on the LAN listener, and DB-enforced immutability
 of submitted answers (a candidate's responses can't be changed once
 submitted — enforced by SQLite triggers, not just handler code — and a
 SHA-256 of the final answers is stamped at submit time so tampering is
@@ -247,5 +316,3 @@ Deliberately deferred:
   regenerating the roster CSV and restarting with it
 - Theory answers at the centre: the kiosk collects them, but the keyword
   scheme isn't in the package yet, so they aren't auto-scored on submit
-- Auth on the HTTP endpoints (release, checkin, submit) — TLS is now done,
-  see below

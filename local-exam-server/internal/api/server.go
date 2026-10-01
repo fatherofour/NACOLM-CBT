@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
-	"time"
 
 	"cbt.army.mil.ng/local-exam-server/internal/config"
 	"cbt.army.mil.ng/local-exam-server/internal/exam"
@@ -31,19 +29,17 @@ type Server struct {
 	salt []byte              // per-sitting salt, set alongside pkg — see Store.GetOrCreateSalt
 
 	kiosk *kioskState // candidate kiosk sign-in; see kiosk.go
+	invig *invigState // invigilator console sessions; see invigilator.go
 }
 
 func NewServer(cfg config.Config, st *store.Store) *Server {
-	return &Server{cfg: cfg, store: st, kiosk: newKioskState()}
+	return &Server{cfg: cfg, store: st, kiosk: newKioskState(), invig: newInvigState()}
 }
 
 func (s *Server) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("POST /release", s.handleRelease)
-	mux.HandleFunc("POST /checkin", s.handleCheckIn)
-	mux.HandleFunc("GET /paper", s.handlePaper)
-	mux.HandleFunc("POST /submit", s.handleSubmit)
 	s.registerKiosk(mux)
 	s.registerInvigilator(mux)
 	return mux
@@ -101,32 +97,9 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	s.salt = salt
 	s.mu.Unlock()
 
+	// Whoever proved the key is the invigilator: this browser gets a console session.
+	s.startConsoleSession(w, key)
 	writeJSON(w, http.StatusOK, map[string]any{"released": true, "exam_id": pkg.ExamID, "title": pkg.Title})
-}
-
-type checkInRequest struct {
-	CandidateID string `json:"candidate_id"`
-}
-
-func (s *Server) handleCheckIn(w http.ResponseWriter, r *http.Request) {
-	pkg, salt, released := s.isReleased()
-	if !released {
-		writeError(w, http.StatusLocked, "exam has not been released yet")
-		return
-	}
-
-	var req checkInRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CandidateID == "" {
-		writeError(w, http.StatusBadRequest, "candidate_id is required")
-		return
-	}
-
-	if status, err := s.ensurePaper(pkg, salt, req.CandidateID); err != nil {
-		writeError(w, status, err.Error())
-		return
-	}
-
-	s.respondWithPaper(w, pkg.ExamID, req.CandidateID)
 }
 
 // ensurePaper draws and stores the candidate's paper on first check-in.
@@ -161,92 +134,6 @@ func (s *Server) ensurePaper(pkg *models.ExamPackage, salt []byte, candidateID s
 		return http.StatusInternalServerError, fmt.Errorf("failed to update exposure counts: %w", err)
 	}
 	return 0, nil
-}
-
-func (s *Server) handlePaper(w http.ResponseWriter, r *http.Request) {
-	pkg, _, released := s.isReleased()
-	if !released {
-		writeError(w, http.StatusLocked, "exam has not been released yet")
-		return
-	}
-	candidateID := r.URL.Query().Get("candidate_id")
-	if candidateID == "" {
-		writeError(w, http.StatusBadRequest, "candidate_id is required")
-		return
-	}
-	s.respondWithPaper(w, pkg.ExamID, candidateID)
-}
-
-func (s *Server) respondWithPaper(w http.ResponseWriter, examID, candidateID string) {
-	paper, err := s.store.LoadCandidatePaper(examID, candidateID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load paper: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"questions": paper})
-}
-
-type submitRequest struct {
-	CandidateID string `json:"candidate_id"`
-	Responses   []struct {
-		Position      int     `json:"position"`
-		SelectedIndex *int    `json:"selected_index,omitempty"`
-		AnswerText    *string `json:"answer_text,omitempty"`
-	} `json:"responses"`
-}
-
-func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
-	pkg, _, released := s.isReleased()
-	if !released {
-		writeError(w, http.StatusLocked, "exam has not been released yet")
-		return
-	}
-
-	var req submitRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CandidateID == "" {
-		writeError(w, http.StatusBadRequest, "candidate_id and responses are required")
-		return
-	}
-
-	st, err := s.store.GetSessionState(pkg.ExamID, req.CandidateID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load session: "+err.Error())
-		return
-	}
-	if st.SubmittedAt != nil {
-		writeError(w, http.StatusConflict, "this candidate has already submitted; responses can't be changed")
-		return
-	}
-
-	for _, resp := range req.Responses {
-		if err := s.store.RecordResponse(pkg.ExamID, req.CandidateID, resp.Position, resp.SelectedIndex, resp.AnswerText); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to record response: "+err.Error())
-			return
-		}
-	}
-
-	ref := strings.ToUpper(randomHex(2) + "-" + randomHex(2))
-	if _, err := s.store.MarkSubmitted(pkg.ExamID, req.CandidateID, ref, time.Now()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record submission: "+err.Error())
-		return
-	}
-
-	correct, total, err := s.store.AutoMarkMCQ(pkg.ExamID, req.CandidateID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to auto-mark: "+err.Error())
-		return
-	}
-
-	result := map[string]any{"submitted": true, "reference": ref, "mcq_correct": correct, "mcq_total": total}
-	if pkg.PublishMode == "immediate" {
-		// Theory questions (if any) still need instructor marking, so this
-		// is a partial/objective-only score, not a final grade.
-		result["objective_score_visible_to_candidate"] = true
-	} else {
-		result["objective_score_visible_to_candidate"] = false
-		result["message"] = "Result held for instructor review and publish."
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

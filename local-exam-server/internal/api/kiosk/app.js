@@ -16,6 +16,7 @@
     if (!res.ok) {
       const err = new Error(data.error || 'Request failed (' + res.status + ')');
       err.status = res.status;
+      err.locked = !!data.locked;
       throw err;
     }
     return data;
@@ -73,6 +74,7 @@
     online: true, loginError: '', agreed: false, starting: false, submitting: false,
     lastSavedAt: 0, dirty: false, autoSubmitted: false, signOutAt: 0,
     violations: 0, lastViolationAt: 0, notFullscreen: false,
+    locked: false, lockReason: '', warnings: 0, lockAfter: 0, extendedScreen: false,
   };
   const qKey = () => 'nacolm-queue:' + (S.me?.candidate?.service_number || '');
   const fKey = () => 'nacolm-flags:' + (S.me?.candidate?.service_number || '');
@@ -128,7 +130,7 @@
         const btn = f.querySelector('button[type=submit]');
         btn.disabled = true; btn.textContent = 'Signing in…';
         try {
-          await api('POST', '/login', { service_number: svc, pin });
+          await api('POST', '/login', { service_number: svc, pin, seat });
           S.loginError = '';
           sessionStorage.removeItem('svc-draft');
           await afterLogin();
@@ -202,6 +204,10 @@
                 h('li', { text: 'Use the question numbers on the right to move around. Flag any question you want to come back to.' }),
                 h('li', { text: 'The timer starts when you press Start. When it reaches zero, your answers are submitted for you.' }),
                 h('li', { text: 'Don’t close this window or try to leave it. Every action is recorded.' })),
+              h('p', { class: 'integrity' },
+                h('b', { text: 'This exam is monitored. ' }),
+                'Leaving the exam screen, switching windows, a second display, printing, screenshots and copying are blocked or recorded, and shown to the invigilator. ' +
+                (lockAfter() ? 'After ' + lockAfter() + ' warnings your exam pauses until the invigilator unlocks it, and your time keeps running.' : '')),
               h('div', { class: 'alert info' }, h('div', {},
                 h('b', { text: hold ? 'Your results come later' : 'You’ll see your score when you submit' }),
                 hold ? 'Your answers are marked when you submit, and your instructor releases the results.' : 'Objective answers are marked as soon as you submit, and your score appears on screen.')))),
@@ -251,7 +257,7 @@
           h('li', {}, h('span', { class: 'sw flag' }, icon(I.flag, 12)), 'Flagged to come back to')),
         h('div', { class: 'grow' }),
         h('button', { class: 'btn', onclick: () => { S.view = 'review'; render(); } }, 'Review and submit'));
-      return h('div', { class: 'screen' }, examHeader(), banners(), h('div', { class: 'exam' }, main, side), S.confirming ? confirmDialog() : null);
+      return h('div', { class: 'screen' }, examHeader(), banners(), h('div', { class: 'exam' }, main, side), S.confirming ? confirmDialog() : null, guards());
     },
 
     review() {
@@ -276,7 +282,7 @@
             h('button', { class: 'btn', onclick: () => { S.view = 'exam'; render(); } }, 'Back to questions'),
             h('span', { class: 'note', text: unanswered.length ? unanswered.length + ' question' + (unanswered.length === 1 ? ' is' : 's are') + ' not answered.' : 'Every question is answered.' }),
             h('button', { class: 'btn primary', onclick: () => { S.confirming = true; render(); } }, icon(I.lock), 'Submit answers')))),
-        S.confirming ? confirmDialog() : null);
+        S.confirming ? confirmDialog() : null, guards());
     },
 
     done() {
@@ -332,10 +338,51 @@
           h('span', { text: 'You’ve left full-screen mode. This is recorded and visible to the invigilator.' }),
           h('button', { class: 'btn', onclick: enterFullscreen }, 'Return to full screen'))
         : null,
+      S.extendedScreen
+        ? h('div', { class: 'banner watch', role: 'alert', text: 'A second display is connected to this computer. Disconnect it and raise your hand. This is recorded.' })
+        : null,
       S.violations > 0 && Date.now() - S.lastViolationAt < 6000
-        ? h('div', { class: 'banner watch', role: 'alert', text: 'You left this screen (switched tab or window). This has been recorded — warning ' + S.violations + '.' })
+        ? h('div', { class: 'banner watch', role: 'alert', text: 'That was recorded and shown to the invigilator' + (lockAfter() ? ' (warning ' + S.warnings + ' of ' + lockAfter() + ').' : '.') })
         : null,
     ];
+  }
+  const lockAfter = () => S.lockAfter || S.status?.lock_after || 0;
+
+  // Faint repeated name and service number across the exam: a photo of the
+  // screen shows whose it was. An SVG data URL, which the kiosk CSP allows.
+  let wmCache = { key: '', url: '' };
+  function watermark() {
+    const c = S.me?.candidate;
+    if (!c) return null;
+    const label = (c.service_number + '  ' + c.rank + ' ' + c.full_name + (seat ? '  ' + seat : '')).replace(/[<>&"']/g, '');
+    if (wmCache.key !== label) {
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="460" height="220"><text x="20" y="130" transform="rotate(-24 230 110)" font-family="Arial" font-size="20" font-weight="700" fill="#1a2015">' + label + '</text></svg>';
+      wmCache = { key: label, url: 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg) + '")' };
+    }
+    return h('div', { class: 'wm', 'aria-hidden': 'true', style: { backgroundImage: wmCache.url } });
+  }
+  function guards() {
+    return [watermark(), S.locked ? pausedOverlay() : null];
+  }
+  function pausedOverlay() {
+    return h('div', { class: 'paused', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'paused-t' },
+      h('div', { class: 'dialog' },
+        h('h2', { id: 'paused-t', text: 'Your exam is paused' }),
+        h('p', { text: 'This computer recorded ' + (S.lockReason || 'several integrity warnings') + ', such as leaving the exam screen. Stay seated and raise your hand: the invigilator will check and unlock it.' }),
+        h('p', { class: 'muted', text: 'Your answers so far are saved. Your time is still running.' }),
+        h('div', { class: 'timer', role: 'timer', 'aria-label': 'Time left' }, h('small', { text: 'Time left' }), h('span', { id: 'timer-p', text: fmt(leftSeconds()) }))));
+  }
+  function applyIntegrity(v) {
+    if (!v) return;
+    const was = S.locked;
+    S.locked = !!v.locked;
+    S.lockReason = v.lock_reason || '';
+    if (typeof v.warnings === 'number') S.warnings = v.warnings;
+    if (typeof v.lock_after === 'number') S.lockAfter = v.lock_after;
+    if (was !== S.locked) {
+      render();
+      if (!S.locked) flush();
+    }
   }
   function enterFullscreen() {
     const el = document.documentElement;
@@ -347,10 +394,19 @@
     return h('div', {},
       h('label', { class: 'theory' }, 'Your answer',
         h('textarea', { id: 'answer-' + q.position, rows: '11', value: text, placeholder: 'Type your answer in full sentences.', spellcheck: 'false',
-          oninput: (e) => { typeAnswer(q.position, e.target.value); const c = document.getElementById('wc'); if (c) { const k = words(e.target.value); c.textContent = wordLabel(k); c.className = k < MIN_WORDS ? 'few' : 'enough'; } } })),
+          autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off',
+          oninput: (e) => { checkBulkInsert(e, q.position); typeAnswer(q.position, e.target.value); const c = document.getElementById('wc'); if (c) { const k = words(e.target.value); c.textContent = wordLabel(k); c.className = k < MIN_WORDS ? 'few' : 'enough'; } } })),
       h('div', { class: 'wordrow' },
         h('span', { id: 'wc', class: n < MIN_WORDS ? 'few' : 'enough', text: wordLabel(n) }),
         h('span', { class: 'note', text: 'Saved on this computer as you type' })));
+  }
+  // Typing adds a few characters per input event. A large block arriving at
+  // once (an auto-typing tool, a browser extension, dictation software) is
+  // recorded; ordinary paste is already blocked.
+  function checkBulkInsert(e, pos) {
+    const before = (S.answers[pos]?.answer_text || '').length;
+    const added = e.target.value.length - before;
+    if (added > 80 && e.inputType !== 'insertCompositionText') reportViolation('bulk_insert');
   }
   const wordLabel = (n) => n + ' word' + (n === 1 ? '' : 's') + (n < MIN_WORDS ? ' (' + MIN_WORDS + ' needed for any marks)' : '');
   function confirmDialog() {
@@ -419,7 +475,11 @@
           if (!S.online) { S.online = true; render(); }
         } catch (err) {
           if (!err.status) { if (S.online) { S.online = false; render(); } break; }
-          if (err.status === 401) { S.online = true; toLogin(); break; }
+          if (err.status === 401) { S.online = true; toLogin(err.message); break; }
+          // Paused (or not yet open): keep the answer queued and send it once unlocked.
+          if (err.status === 423) { if (err.locked) applyIntegrity({ locked: true, lock_reason: S.lockReason }); break; }
+          // A server-side failure is temporary: keep the answer and retry on the next flush.
+          if (err.status >= 500 || err.status === 429) break;
           // Server refused it (submitted, time up): drop it rather than retry forever.
           const cur = loadQueue(); delete cur[keys[0]]; saveQueue(cur);
         }
@@ -433,6 +493,7 @@
   // ---- flow ----
   async function afterLogin() {
     S.me = await api('GET', '/me');
+    if (S.me.integrity) { S.lockAfter = S.me.integrity.lock_after; S.warnings = S.me.integrity.warnings; }
     try { S.flags = JSON.parse(sessionStorage.getItem(fKey()) || '{}'); } catch (_) { S.flags = {}; }
     if (S.me.session?.submitted_at) {
       S.result = await api('POST', '/submit');
@@ -456,10 +517,21 @@
     if (d.session.submitted_at) { S.result = await api('POST', '/submit'); finish(false); return; }
     S.view = 'exam';
     S.starting = false;
+    applyIntegrity(d.integrity);
     enterFullscreen(); // best-effort: needs the user gesture from the Start button click, which this is
     render();
+    checkScreens();
     flush();
   }
+
+  // Chromium-based browsers say whether the desktop spans more than one
+  // display; elsewhere this is unknown and stays quiet.
+  function checkScreens() {
+    const extended = window.screen && window.screen.isExtended === true;
+    if (extended && !S.extendedScreen && inExam()) reportViolation('multi_screen');
+    if (extended !== S.extendedScreen) { S.extendedScreen = extended; if (inExam()) render(); }
+  }
+  if (window.screen && window.screen.addEventListener) window.screen.addEventListener('change', checkScreens);
 
   async function submit(auto) {
     if (S.submitting) return;
@@ -487,9 +559,11 @@
     render();
   }
 
-  async function toLogin() {
+  async function toLogin(message) {
     try { await api('POST', '/logout'); } catch (_) {}
-    Object.assign(S, { view: 'login', me: null, paper: null, questions: [], answers: {}, flags: {}, cur: 0, deadline: null, confirming: false, result: null, agreed: false, autoSubmitted: false, loginError: '' });
+    Object.assign(S, { view: 'login', me: null, paper: null, questions: [], answers: {}, flags: {}, cur: 0, deadline: null, confirming: false, result: null, agreed: false, autoSubmitted: false,
+      loginError: typeof message === 'string' && /another computer/.test(message) ? message : '', locked: false, lockReason: '', warnings: 0, extendedScreen: false });
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
     render();
   }
 
@@ -500,6 +574,8 @@
       const v = document.getElementById('timer-v');
       const wasLow = document.querySelector('.timer.low, .timer.crit');
       if (v) v.textContent = fmt(left);
+      const p = document.getElementById('timer-p');
+      if (p) p.textContent = fmt(left);
       if ((left === 600 || left === 120) || (left <= 600 && !wasLow)) render();
       if (S.deadline && left === 0 && !S.submitting) submit(true);
     } else if (S.view === 'done') {
@@ -510,6 +586,27 @@
     }
   }, 1000);
   setInterval(() => { if (S.view === 'exam' || S.view === 'review') flush(); }, 5000);
+
+  // Heartbeat: keeps this computer shown as online to the invigilator and
+  // picks up what the server decided since (a pause, an unlock, extra time).
+  // Every 10s normally, every 3s while paused so an unlock shows quickly.
+  let lastBeat = 0;
+  setInterval(async () => {
+    if (!inExam() || Date.now() - lastBeat < (S.locked ? 3000 : 10000)) return;
+    lastBeat = Date.now();
+    checkScreens();
+    try {
+      const hb = await api('POST', '/heartbeat', { fullscreen: !!document.fullscreenElement, focused: document.hasFocus(), screens_extended: S.extendedScreen });
+      if (hb.deadline) {
+        const before = S.deadline;
+        setClock(hb.server_now, hb.deadline);
+        if (before && S.deadline !== before) render();
+      }
+      applyIntegrity(hb.integrity);
+    } catch (err) {
+      if (err.status === 401) toLogin(err.message);
+    }
+  }, 1000);
   // The instructions screen waits for the invigilator to open the paper.
   setInterval(async () => {
     if (S.view !== 'instructions' || S.me?.released) return;
@@ -526,14 +623,53 @@
   // that actually matters for integrity — detect and record every one of
   // these so the invigilator, physically in the room, sees it happen.
   function inExam() { return S.view === 'exam' || S.view === 'review'; }
-  function reportViolation(kind) {
+  const QUIET = { blocked_shortcut: true, paste_attempt: true }; // blocked anyway: logged without a banner
+  const lastReport = {};
+  function reportViolation(kind, detail) {
     if (!inExam()) return;
+    if (Date.now() - (lastReport[kind] || 0) < 2000) return;
+    lastReport[kind] = Date.now();
+    // Best-effort: never blocks the candidate. The server decides about pausing.
+    api('POST', '/violation', { kind, detail }).then((r) => applyIntegrity(r.integrity), () => {});
+    if (QUIET[kind]) return;
     S.violations++;
     S.lastViolationAt = Date.now();
-    api('POST', '/violation', { kind }).catch(() => {}); // best-effort: never blocks the candidate
     render();
     setTimeout(() => { if (Date.now() - S.lastViolationAt >= 6000) render(); }, 6100);
   }
+
+  // Shortcuts for copying, printing, saving, searching, reloading, viewing
+  // source and developer tools. Browsers reserve some (new tab or window,
+  // Alt+Tab, the Windows key) and give a page no way to stop them; leaving
+  // the window that way is caught by the blur and visibility checks below,
+  // and Safe Exam Browser or kiosk mode removes them entirely.
+  const BLOCKED = { c: 'copy', x: 'cut', v: 'paste', a: 'select all', p: 'print', s: 'save', u: 'view source', f: 'find', g: 'find', h: 'history', j: 'downloads', o: 'open', r: 'reload', d: 'bookmark', l: 'address bar', e: 'search', k: 'search', i: 'devtools' };
+  document.addEventListener('keydown', (e) => {
+    if (!inExam()) return;
+    const k = (e.key || '').toLowerCase();
+    const mod = e.ctrlKey || e.metaKey;
+    const label = (e.ctrlKey ? 'Ctrl+' : '') + (e.metaKey ? 'Cmd+' : '') + (e.altKey ? 'Alt+' : '') + (e.shiftKey ? 'Shift+' : '') + (k.length === 1 ? k.toUpperCase() : e.key);
+    const inText = e.target && e.target.tagName === 'TEXTAREA';
+    let block = false;
+    if (e.key === 'F12' || e.key === 'F5' || e.key === 'F11' || e.key === 'F3' || e.key === 'F7') block = true;
+    else if (mod && e.shiftKey && 'ijck'.includes(k)) block = true; // developer tools
+    else if (mod && BLOCKED[k] && !(inText && (k === 'a' || k === 'z' || k === 'y'))) block = true;
+    else if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home')) block = true; // back / forward / home page
+    if (!block) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (mod && k === 'p') reportViolation('print_attempt');
+    else reportViolation('blocked_shortcut', label.slice(0, 40));
+  }, true);
+  // Print Screen fires no keydown on Windows; keyup is the only signal. The
+  // screenshot itself can't be stopped by a page, so it is recorded and the
+  // clipboard is overwritten where the browser allows it.
+  document.addEventListener('keyup', (e) => {
+    if (!inExam() || e.key !== 'PrintScreen') return;
+    reportViolation('screenshot_key');
+    try { navigator.clipboard?.writeText(' ').catch(() => {}); } catch (_) {}
+  }, true);
+  window.addEventListener('beforeprint', () => reportViolation('print_attempt'));
   document.addEventListener('visibilitychange', () => { if (document.hidden) reportViolation('tab_hidden'); });
   window.addEventListener('blur', () => { if (!document.hidden) reportViolation('window_blur'); });
   document.addEventListener('fullscreenchange', () => {
@@ -542,7 +678,23 @@
     else if (fs && S.notFullscreen) { S.notFullscreen = false; render(); }
   });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
-  for (const ev of ['copy', 'cut', 'paste', 'drop']) document.addEventListener(ev, (e) => { if (inExam()) e.preventDefault(); });
+  for (const ev of ['copy', 'cut', 'drop', 'dragstart', 'selectstart']) {
+    document.addEventListener(ev, (e) => {
+      if (!inExam()) return;
+      if (ev === 'selectstart' && e.target && e.target.closest && e.target.closest('textarea')) return; // selecting their own answer is fine
+      e.preventDefault();
+    });
+  }
+  document.addEventListener('paste', (e) => { if (inExam()) { e.preventDefault(); reportViolation('paste_attempt'); } });
+  // Catches text inserted by other means than the paste event (drag-in,
+  // middle-click on Linux, some input tools).
+  document.addEventListener('beforeinput', (e) => {
+    if (!inExam()) return;
+    if (e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop' || e.inputType === 'insertFromYank' || e.inputType === 'insertFromPasteAsQuotation') {
+      e.preventDefault();
+      reportViolation('paste_attempt');
+    }
+  }, true);
   window.addEventListener('beforeunload', (e) => { if (inExam()) { e.preventDefault(); e.returnValue = ''; } });
   document.addEventListener('keydown', (e) => {
     if (S.view !== 'exam' || S.confirming) {

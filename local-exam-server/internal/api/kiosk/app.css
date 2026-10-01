@@ -175,3 +175,18 @@ dl.facts .wide { grid-column: 1 / -1; }
   .qmain { padding: 20px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* exam integrity */
+img { -webkit-user-drag: none; }
+/* Faint repeated name and service number over the exam, so a photo of the screen shows whose it was. */
+.wm { position: fixed; inset: 0; pointer-events: none; z-index: 5; background-repeat: repeat; opacity: 0.07; }
+.paused { position: fixed; inset: 0; z-index: 20; background: rgba(15,24,15,0.82); display: grid; place-items: center; padding: 24px; }
+.paused .dialog { width: 620px; border-top: 6px solid var(--army-red); }
+.paused .dialog h2 { color: var(--rejected); }
+.paused .timer { align-self: flex-start; background: var(--surface-sunken); color: var(--ink); align-items: flex-start; }
+.integrity { margin: 0; padding: 14px 16px; border-radius: 5px; background: var(--rejected-soft); font-size: 15px; line-height: 22px; }
+.integrity b { color: var(--rejected); }
+@media print {
+  body * { display: none !important; }
+  body::after { content: "Printing is not allowed during the examination."; display: block; padding: 40px; font: 20px Archivo, sans-serif; }
+}
