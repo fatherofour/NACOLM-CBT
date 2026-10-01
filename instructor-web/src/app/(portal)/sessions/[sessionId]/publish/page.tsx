@@ -176,6 +176,10 @@ function PackagePanel({ paperVersionId, isOfficer }: { paperVersionId: string; i
         <dl className="nc-freeze-sum">
           <div><dt>Questions</dt><dd>{pkg.poolSize}</dd></div>
           <div><dt>Checksum</dt><dd className="break-all">{pkg.checksumSha256.slice(0, 16)}…</dd></div>
+          <div className="col-span-2">
+            <dt>Exam ID for the venue server (CBT_EXAM_ID)</dt>
+            <dd className="break-all font-mono">{paperVersionId}</dd>
+          </div>
           {built ? (
             <div className="col-span-2">
               <dt>Release key — shown once, never stored</dt>
@@ -183,6 +187,14 @@ function PackagePanel({ paperVersionId, isOfficer }: { paperVersionId: string; i
             </div>
           ) : null}
         </dl>
+      ) : null}
+      {pkg && isOfficer ? (
+        <div className="nc-row">
+          <a className="btnlink" href={`/api/packages/${paperVersionId}/download`} download>
+            Download package (.cbtpkg)
+          </a>
+          <span className="text-sm text-ink-muted">Copy it to the venue exam server, e.g. on a USB stick. It can’t be opened without the release key.</span>
+        </div>
       ) : null}
       {built ? (
         <Alert tone="info" title="How this opens the exam for candidates">

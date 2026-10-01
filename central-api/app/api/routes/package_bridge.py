@@ -6,15 +6,19 @@ wire format local-exam-server's Go code reads. Nothing here is persisted in
 central-api's own database.
 """
 
+import re
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from app.core.config import get_settings
 from app.schemas.package_bridge import BuildFromPaperRequest, BuildFromPaperResponse
 from app.services.packaging import build_package_from_payload, serialize_payload, write_package
 
 router = APIRouter(prefix="/package-bridge", tags=["package-bridge"])
+
+_EXAM_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 @router.post("/build", response_model=BuildFromPaperResponse)
@@ -44,3 +48,15 @@ def build_from_paper(payload: BuildFromPaperRequest) -> BuildFromPaperResponse:
         release_key_hex=key.hex(),
         pool_size=len(payload.pool),
     )
+
+
+@router.get("/packages/{exam_id}")
+def download_package(exam_id: str) -> FileResponse:
+    """The encrypted package file, for the exam officer to carry to the venue.
+    It is useless without the release key, which is never stored here."""
+    if not _EXAM_ID.match(exam_id):
+        raise HTTPException(status_code=400, detail="invalid exam id")
+    path = Path(get_settings().package_storage_dir) / f"{exam_id}.cbtpkg"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no package has been built for this exam")
+    return FileResponse(path, media_type="application/octet-stream", filename=f"{exam_id}.cbtpkg")

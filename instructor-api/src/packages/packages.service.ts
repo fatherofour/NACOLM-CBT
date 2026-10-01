@@ -109,4 +109,13 @@ export class PackagesService {
       poolSize: result.pool_size,
     };
   }
+
+  /** The encrypted package file, streamed from central-api for the exam officer to take to the venue. */
+  async download(paperVersionId: string) {
+    const pkg = await this.prisma.examPackage.findUnique({ where: { paperVersionId } });
+    if (!pkg) throw new NotFoundException('No package has been built for this paper version yet.');
+    const res = await fetch(`${CENTRAL_API_URL}/package-bridge/packages/${encodeURIComponent(paperVersionId)}`, { headers: centralApiHeaders() });
+    if (!res.ok) throw new NotFoundException('The package file could not be found. Rebuild the package.');
+    return Buffer.from(await res.arrayBuffer());
+  }
 }

@@ -73,3 +73,18 @@ def test_wrong_exam_id_fails_to_decrypt(client):
     key = bytes.fromhex(body["release_key_hex"])
     with pytest.raises(Exception):
         crypto.decrypt(envelope, key, aad=b"some-other-paperversion")
+
+
+def test_built_package_can_be_downloaded(client):
+    body = client.post("/package-bridge/build", json=_payload()).json()
+    resp = client.get("/package-bridge/packages/paperversion-123")
+    assert resp.status_code == 200
+    assert resp.content == open(body["storage_path"], "rb").read()
+    assert "paperversion-123.cbtpkg" in resp.headers["content-disposition"]
+
+
+def test_download_refuses_unknown_and_unsafe_ids(client):
+    assert client.get("/package-bridge/packages/never-built").status_code == 404
+    assert client.get("/package-bridge/packages/..%2Fsecrets").status_code in (400, 404)
+    no_token = client.get("/package-bridge/packages/paperversion-123", headers={"X-Service-Token": ""})
+    assert no_token.status_code == 401
