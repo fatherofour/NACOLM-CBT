@@ -19,7 +19,7 @@ flowchart TD
   G -->|Approve or edit| H["Check topic coverage"]
   G -->|Reject| F
   H --> I["Add candidates and issue PINs"]
-  I --> J["Exam officer publishes the paper and builds the package"]
+  I --> J["Exam officer or admin publishes the paper and builds the package"]
   J --> K["Exam runs at the venue; objective questions marked automatically"]
   K --> L["Theory answers written on QR-coded answer sheets"]
   L --> M["Scan all pages and upload them in one go; each page is filed by its code"]
@@ -73,7 +73,7 @@ flowchart TD
   class D2 human
 ```
 
-- **Admins set up, instructors run exams.** Only admins can create accounts and courses. Publishing a paper and building the exam package stay with the exam officer.
+- **Admins set up, instructors run exams.** Only admins can create accounts and courses. Publishing a paper, setting its exam date and building the exam package are done by the exam officer or an admin; the published version records who did it.
 - **Results follow the same rule.** An admin can publish results, but only once every script has been confirmed by a person.
 
 ## Who can do what
@@ -84,6 +84,6 @@ flowchart TD
 | Add candidates and reset PINs | Yes | Yes | Yes |
 | Upload scans, review and confirm theory marks | Yes | Yes | Yes |
 | Publish confirmed theory results | Yes | Yes | Yes |
-| Publish the exam paper and build the package | No | Yes | No |
+| Publish the exam paper and build the package | No | Yes | Yes |
 | Create courses and sessions | No | No | Yes |
 | Create and manage user accounts | No | No | Yes |

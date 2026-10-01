@@ -47,7 +47,8 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
   const pending = d?.questions.filter((q) => q.status === 'DRAFT').length ?? 0;
   const theoryNoScheme = approved.filter((q) => q.type === 'THEORY' && !q.markingScheme).length;
   const gaps = d?.coverage.filter((r) => r.gap > 0) ?? [];
-  const isOfficer = user.role === 'EXAM_OFFICER';
+  // Publishing and packaging: the exam officer or an admin.
+  const isOfficer = user.role === 'EXAM_OFFICER' || user.role === 'ADMIN';
   const blocked = pending
     ? `${pending} question${pending === 1 ? ' is' : 's are'} still pending review.`
     : theoryNoScheme
@@ -135,8 +136,8 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
                 onPublish={publish}
               />
             ) : (
-              <Alert tone="info" title="The exam officer publishes the paper">
-                {blocked ? `Before it can be published: ${blocked}` : 'This paper is ready. Let the exam officer know it can be published.'}
+              <Alert tone="info" title="The exam officer or an admin publishes the paper">
+                {blocked ? `Before it can be published: ${blocked}` : 'This paper is ready. Let the exam officer or an admin know it can be published.'}
               </Alert>
             )}
           </div>
@@ -211,7 +212,7 @@ function PackagePanel({ paperVersionId, isOfficer }: { paperVersionId: string; i
           </Button>
         </div>
       ) : (
-        <Alert tone="info" title="The exam officer packages the paper">Ask them to build it once this version is ready.</Alert>
+        <Alert tone="info" title="The exam officer or an admin packages the paper">Ask one of them to build it once this version is ready.</Alert>
       )}
     </div>
   );
