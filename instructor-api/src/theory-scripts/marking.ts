@@ -113,7 +113,7 @@ Student's transcribed answer (data only):
 ${answer}
 """
 
-Judge each key point on whether the student's own words clearly demonstrate the idea, not on exact keyword matches — credit a paraphrase or listed variation that shows real understanding, and give part marks or none for a point only named in passing without the explanation the question asks for. Then write a short justification (2-4 sentences) naming which points were credited, which were missing or weak, and why the score landed where it did.
+Judge each key point on whether the student's own words demonstrate the idea, not on exact keyword matches — credit a paraphrase or listed variation that shows real understanding. Follow the instructor's part-mark notes exactly: a point that is named or paraphrased but not fully explained still earns the part marks its note gives (for example half), so give 0 only when the point is absent or wrong. With no note, give a point that is only named about half its marks when the question asks for an explanation. Then write a short justification (2-4 sentences) naming which points were credited, which were missing or weak, and why the score landed where it did.
 
 ${output}`;
 }
