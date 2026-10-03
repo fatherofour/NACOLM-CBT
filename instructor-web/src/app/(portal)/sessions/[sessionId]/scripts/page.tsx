@@ -3,12 +3,14 @@ import Link from 'next/link';
 import { use, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Chip, EmptyState, Spinner } from '@/components/nc/basics';
 import { PageHead, Panel } from '@/components/shell/page-head';
+import { useUser } from '@/components/shell/user-context';
 import {
   api,
   qs,
   type BulkUploadResult,
   type Candidate,
   type MarkerAgreement,
+  type MarkEvent,
   type Paper,
   type Question,
   type ScriptAnswer,
@@ -568,6 +570,15 @@ function ScriptDetail({ script: s, onChanged }: { script: ScriptAnswer; onChange
   const processing = s.status === 'UPLOADED';
   const n = Number(score);
   const scoreOk = score.trim() !== '' && Number.isFinite(n) && n >= 0 && (max == null || n <= max);
+  // A mark that differs from the AI's proposal needs a reason; it is kept with the result.
+  const differs = s.aiScore != null && scoreOk && n !== s.aiScore;
+  const reasonOk = !differs || notes.trim().length > 0;
+  const user = useUser();
+  const canCorrect = user.role === 'EXAM_OFFICER' || user.role === 'ADMIN';
+  const [events, setEvents] = useState<MarkEvent[]>([]);
+  useEffect(() => {
+    api.get<MarkEvent[]>(`/theory-scripts/${s.id}/events`).then(setEvents, () => undefined);
+  }, [s.id, s.updatedAt]);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -634,6 +645,26 @@ function ScriptDetail({ script: s, onChanged }: { script: ScriptAnswer; onChange
         {s.aiScore != null ? (
           <>
             <p className="m-0"><span className="figure text-2xl font-bold">{s.aiScore}</span> <span className="text-ink-muted">out of {s.aiMaxScore}, proposed only, not final</span></p>
+            {s.aiBreakdown?.length ? (
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="text-left text-ink-muted">
+                    <th className="py-1 pr-3 font-[600]">Key point</th>
+                    <th className="py-1 pr-3 font-[600]">What the candidate wrote</th>
+                    <th className="py-1 text-right font-[600]">Marks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.aiBreakdown.map((p) => (
+                    <tr key={p.point} className="border-t border-line align-top">
+                      <td className="py-1.5 pr-3 font-[600]">{p.point}</td>
+                      <td className={`py-1.5 pr-3 ${p.awarded ? '' : 'text-ink-muted'}`}>{p.evidence}</td>
+                      <td className="figure py-1.5 text-right">{p.awarded}/{p.max}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : null}
             <p className="m-0 whitespace-pre-wrap">{s.aiJustification}</p>
           </>
         ) : !processing && !s.aiError ? (
@@ -669,15 +700,15 @@ function ScriptDetail({ script: s, onChanged }: { script: ScriptAnswer; onChange
                 <input type="number" min={0} max={max} step="0.5" value={score} onChange={(e) => setScore(e.target.value)} />
               </label>
               <label className="label">
-                Note (optional, e.g. why you changed the AI mark)
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+                {differs ? `Why your mark differs from the AI’s ${s.aiScore} (required, kept with the result)` : 'Note (optional)'}
+                <input value={notes} onChange={(e) => setNotes(e.target.value)} aria-invalid={!reasonOk} />
               </label>
             </div>
             {error ? <Alert tone="error" title="Couldn’t save">{error}</Alert> : null}
             <div className="flex justify-end">
               <Button
                 variant="primary"
-                disabled={!scoreOk || busy}
+                disabled={!scoreOk || !reasonOk || busy}
                 onClick={() => run(() => api.patch(`/theory-scripts/${s.id}/review`, { score: n, notes: notes.trim() || undefined }))}
               >
                 {busy ? 'Saving…' : s.status === 'REVIEWED' ? 'Update confirmed mark' : 'Confirm mark'}
@@ -686,7 +717,122 @@ function ScriptDetail({ script: s, onChanged }: { script: ScriptAnswer; onChange
           </>
         )}
         {locked && error ? <Alert tone="error" title="Something went wrong">{error}</Alert> : null}
+        {locked && canCorrect ? <CorrectMark script={s} onDone={onChanged} /> : null}
       </Panel>
+
+      {s.aiBreakdown?.length && !processing ? <AddVariation script={s} /> : null}
+      {events.length ? <MarkHistory events={events} /> : null}
     </div>
+  );
+}
+
+const EVENT_LABEL: Record<MarkEvent['kind'], string> = {
+  AI_PROPOSED: 'AI proposed',
+  CONFIRMED: 'Confirmed the AI’s mark',
+  CHANGED: 'Changed the mark',
+  PUBLISHED: 'Published',
+  CORRECTED: 'Corrected after publishing',
+};
+
+function MarkHistory({ events }: { events: MarkEvent[] }) {
+  return (
+    <Panel className="flex flex-col gap-2 p-4">
+      <h3 className="m-0 text-[15px] font-[650]">Mark history</h3>
+      <ol className="m-0 flex list-none flex-col gap-1.5 p-0 text-sm">
+        {events.map((e) => (
+          <li key={e.id} className="grid grid-cols-[120px_1fr] gap-3">
+            <span className="text-ink-muted">{fmt(e.createdAt)}</span>
+            <span>
+              <b>{EVENT_LABEL[e.kind]}</b>
+              {e.score != null ? `: ${e.previousScore != null && e.previousScore !== e.score ? `${e.previousScore} → ` : ''}${e.score}` : ''} · {e.actor}
+              {e.reason ? <span className="block text-ink-muted">“{e.reason}”</span> : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </Panel>
+  );
+}
+
+function CorrectMark({ script: s, onDone }: { script: ScriptAnswer; onDone: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [score, setScore] = useState(String(s.instructorScore ?? ''));
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const n = Number(score);
+  const ok = score.trim() !== '' && Number.isFinite(n) && n >= 0 && (s.aiMaxScore == null || n <= s.aiMaxScore) && reason.trim().length >= 5;
+  if (!open) return <div><Button variant="quiet" onClick={() => setOpen(true)}>Correct this published mark…</Button></div>;
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-line p-3">
+      <p className="m-0 text-sm">A correction is added to the record with your name and reason; the original mark stays in the history.</p>
+      <div className="grid gap-3 md:grid-cols-[160px_1fr]">
+        <label className="label">Corrected mark<input type="number" min={0} max={s.aiMaxScore ?? undefined} step="0.25" value={score} onChange={(e) => setScore(e.target.value)} /></label>
+        <label className="label">Reason (required)<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
+      </div>
+      {error ? <Alert tone="error" title="Couldn’t correct">{error}</Alert> : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="quiet" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={!ok || busy}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              await api.post(`/theory-scripts/${s.id}/correct`, { score: n, reason: reason.trim() });
+              setOpen(false);
+              await onDone();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? 'Saving…' : 'Record correction'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddVariation({ script: s }: { script: ScriptAnswer }) {
+  const points = s.aiBreakdown ?? [];
+  const [point, setPoint] = useState(points[0]?.point ?? '');
+  const [phrase, setPhrase] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState('');
+  const [error, setError] = useState('');
+  return (
+    <Panel className="flex flex-col gap-2 p-4">
+      <h3 className="m-0 text-[15px] font-[650]">Teach the scheme a phrasing</h3>
+      <p className="m-0 text-sm text-ink-muted">If the candidate expressed a key point well in words the scheme didn’t list, add them as an accepted variation. This improves the question in the bank for future papers; it doesn’t change this paper’s marking.</p>
+      <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+        <label className="label">Key point<select value={point} onChange={(e) => setPoint(e.target.value)}>{points.map((p) => <option key={p.point} value={p.point}>{p.point}</option>)}</select></label>
+        <label className="label">Phrasing to accept<input value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="as the candidate wrote it" /></label>
+        <Button
+          disabled={!point || phrase.trim().length < 2 || busy}
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            setDone('');
+            try {
+              await api.post(`/question-bank/${s.questionId}/marking-scheme/variations`, { canonicalTerm: point, phrase: phrase.trim() });
+              setDone(`Added “${phrase.trim()}” to ${point}.`);
+              setPhrase('');
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Add variation
+        </Button>
+      </div>
+      {done ? <p className="m-0 text-sm text-[var(--approved)]">{done}</p> : null}
+      {error ? <Alert tone="error" title="Couldn’t add it">{error}</Alert> : null}
+    </Panel>
   );
 }

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { centralApiHeaders } from '../central-api/central-api-auth.js';
 
@@ -22,8 +23,9 @@ interface BridgeResponse {
 export class PackagesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // The results key stays server-side: it travels to the venue only inside the encrypted package.
   get(paperVersionId: string) {
-    return this.prisma.examPackage.findUnique({ where: { paperVersionId } });
+    return this.prisma.examPackage.findUnique({ where: { paperVersionId }, omit: { resultsKeyHex: true } });
   }
 
   async build(paperVersionId: string, builtBy: string) {
@@ -45,7 +47,17 @@ export class PackagesService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const pool = version.items.map(({ question: q }) => ({
+    // Theory on paper: the kiosk shows only objective questions and tells
+    // candidates how many theory answers go on their answer sheets.
+    const onPaper = version.paper.theoryOnPaper;
+    const kioskItems = onPaper ? version.items.filter((i) => i.question.type !== 'THEORY') : version.items;
+    if (!kioskItems.length) throw new BadRequestException('This paper has no objective questions for the kiosk; its theory is all on paper.');
+    const theoryOnPaper = onPaper ? version.items.length - kioskItems.length : 0;
+    // Carried inside the encrypted package; the venue signs its results file
+    // with it, so an imported results file can be checked for tampering.
+    const resultsKeyHex = randomBytes(32).toString('hex');
+
+    const pool = kioskItems.map(({ question: q }) => ({
       id: q.id,
       type: q.type === 'OBJECTIVE' ? 'mcq' : 'theory',
       topic: q.topic,
@@ -70,6 +82,8 @@ export class PackagesService {
       questions_per_candidate: pool.length, // the paper is already finalized — every candidate sees all of it, just shuffled
       publish_mode: blueprint?.resultsRelease === 'instant' ? 'immediate' : 'instructor_controlled',
       pool,
+      theory_on_paper: theoryOnPaper,
+      results_key_hex: resultsKeyHex,
     };
 
     const res = await fetch(`${CENTRAL_API_URL}/package-bridge/build`, {
@@ -89,9 +103,11 @@ export class PackagesService {
         storagePath: result.storage_path,
         checksumSha256: result.checksum_sha256,
         poolSize: result.pool_size,
+        resultsKeyHex,
         builtBy,
       },
       update: {
+        resultsKeyHex,
         storagePath: result.storage_path,
         checksumSha256: result.checksum_sha256,
         poolSize: result.pool_size,

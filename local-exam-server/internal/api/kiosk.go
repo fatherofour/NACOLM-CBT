@@ -256,11 +256,12 @@ type paperMeta struct {
 	Questions       int    `json:"questions"`
 	Objective       int    `json:"objective"`
 	Theory          int    `json:"theory"`
+	TheoryOnPaper   int    `json:"theory_on_paper"`
 	PublishMode     string `json:"publish_mode"`
 }
 
 func metaFor(pkg *models.ExamPackage) paperMeta {
-	m := paperMeta{Title: pkg.Title, DurationMinutes: pkg.DurationMinutes, Questions: pkg.QuestionsPerCandidate, PublishMode: pkg.PublishMode}
+	m := paperMeta{Title: pkg.Title, DurationMinutes: pkg.DurationMinutes, Questions: pkg.QuestionsPerCandidate, PublishMode: pkg.PublishMode, TheoryOnPaper: pkg.TheoryOnPaper}
 	// The per-candidate split follows the pool's proportions (see
 	// internal/randomize), so estimate it from the pool for the
 	// instructions screen; the paper itself is authoritative once drawn.
@@ -485,12 +486,13 @@ func (s *Server) kioskSubmit(w http.ResponseWriter, r *http.Request, c roster.Ca
 		}
 	}
 	resp := map[string]any{
-		"submitted":     true,
-		"submitted_at":  st.SubmittedAt,
-		"reference":     st.Reference,
-		"response_hash": st.ResponseHash,
-		"publish_mode":  pkg.PublishMode,
-		"theory":        theory,
+		"submitted":       true,
+		"submitted_at":    st.SubmittedAt,
+		"reference":       st.Reference,
+		"response_hash":   st.ResponseHash,
+		"publish_mode":    pkg.PublishMode,
+		"theory":          theory,
+		"theory_on_paper": pkg.TheoryOnPaper,
 	}
 	if pkg.PublishMode == "immediate" {
 		resp["objective_correct"] = correct

@@ -165,7 +165,7 @@ export function QuestionRow({
         <div className="nc-qrow-actions">
           {q.type === 'THEORY' ? (
             <Button variant="quiet" onClick={onScheme}>
-              {schemeReady ? 'Marking scheme' : 'Set marking scheme'}
+              {!schemeReady ? 'Set marking scheme' : q.markingScheme?.status === 'APPROVED' ? 'Marking scheme (approved)' : 'Marking scheme (draft)'}
             </Button>
           ) : null}
           <span className="nc-grow" />

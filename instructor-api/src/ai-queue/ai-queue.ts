@@ -1,9 +1,14 @@
 export type Stage = 'ocr' | 'mark';
 
 export interface AiJob {
+  /** Dedupe key: a new job with the same id replaces the waiting one. */
   id: string;
   stage: Stage;
   model: string;
+  /** Which registered handler runs it (see AiQueueService); defaults by stage. */
+  kind?: string;
+  /** The record the handler works on, when it differs from the dedupe id. */
+  target?: string;
 }
 
 export interface QueueStatus {

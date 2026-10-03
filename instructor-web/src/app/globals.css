@@ -290,8 +290,9 @@ label.label > input, label.label > textarea { font-weight: 400; font-size: 15px;
 .nc-field { display: flex; flex-direction: column; gap: 6px; }
 .nc-field input { width: 100%; }
 .nc-cg-req { padding-bottom: 8px; }
+.nc-cg-notes { grid-column: 1 / -2; }
 .nc-cg-remove { border: 0; background: transparent; color: var(--ink-muted); height: 36px; cursor: pointer; border-radius: var(--radius-sm); }
-@media (max-width: 640px) { .nc-cg { grid-template-columns: 96px 1fr; position: relative; } .nc-cg-term, .nc-cg-syn { grid-column: 1 / -1; } .nc-cg-term { padding-right: 40px; } .nc-cg-req { justify-self: start; } .nc-cg-remove { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; } }
+@media (max-width: 640px) { .nc-cg { grid-template-columns: 96px 1fr; position: relative; } .nc-cg-term, .nc-cg-syn, .nc-cg-notes { grid-column: 1 / -1; } .nc-cg-term { padding-right: 40px; } .nc-cg-req { justify-self: start; } .nc-cg-remove { position: absolute; top: 4px; right: 4px; width: 44px; height: 44px; } }
 .nc-tester { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 .nc-tester p { margin: 0; }
 .nc-tester-score { display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }

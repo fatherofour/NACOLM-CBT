@@ -50,6 +50,22 @@ enum ScriptAnswerStatus {
   PUBLISHED
 }
 
+enum SchemeStatus {
+  DRAFT
+  APPROVED
+}
+
+// Every change to a theory mark is a new row, never an overwrite: what the
+// AI proposed, what the instructor confirmed or changed (and why), when it
+// was published, and any later correction.
+enum MarkEventKind {
+  AI_PROPOSED
+  CONFIRMED
+  CHANGED
+  PUBLISHED
+  CORRECTED
+}
+
 // Portal users. Passwords are scrypt hashes (see src/auth/password.ts);
 // accounts are created with scripts/create-user.mjs, not self-registration.
 model User {
@@ -155,13 +171,34 @@ model MarkingScheme {
   id             String           @id @default(cuid())
   question       QuestionBankItem @relation(fields: [questionId], references: [id], onDelete: Cascade)
   questionId     String           @unique
-  totalMarks     Int
+  totalMarks     Float
   ceilingPercent Int              @default(50) // score cap if a required group is missing
   minWordCount   Int              @default(15)
   reusedFromBank Boolean          @default(false)
   conceptGroups  ConceptGroup[]
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+
+  // The instructor's model answer; the AI drafts key points and variations from it.
+  modelAnswer        String?
+  partialCreditNotes String? // e.g. "a point named but not explained earns half its marks"
+  zeroCreditNotes    String? // common wrong answers and padding that earn nothing
+  // [{label, text}]: full / partial / weak / off-topic answers to test the scheme with.
+  sampleAnswers      Json?
+  // [{label, score, max, points, justification}] from the last "test with the AI marker".
+  testResults        Json?
+  testedAt           DateTime?
+
+  // An AI draft or test running in the background: "drafting" | "testing", or null.
+  aiTask      String?
+  aiTaskError String?
+
+  // Nothing drafted by the AI counts until an instructor approves the scheme.
+  // Any edit sends it back to DRAFT.
+  status     SchemeStatus @default(DRAFT)
+  approvedBy String?
+  approvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ConceptGroup {
@@ -170,9 +207,10 @@ model ConceptGroup {
   schemeId      String
   canonicalTerm String
   synonyms      String[] // additional acceptable terms, on top of canonicalTerm
-  marks         Int
+  marks         Float
   required      Boolean       @default(false)
   order         Int           @default(0)
+  notes         String? // how to award part marks for this point
 }
 
 model Blueprint {
@@ -196,6 +234,8 @@ model Blueprint {
 
 model Paper {
   id              String         @id @default(cuid())
+  // Theory answered on QR answer sheets rather than typed at the kiosk.
+  theoryOnPaper   Boolean        @default(true)
   session         Session        @relation(fields: [sessionId], references: [id])
   sessionId       String
   title           String
@@ -222,6 +262,7 @@ model PaperVersion {
   examPackage   ExamPackage?
   scriptAnswers TheoryScriptAnswer[]
   unassignedScans UnassignedScan[]
+  venueResults  VenueResult[]
 
   @@unique([paperId, versionNumber])
 }
@@ -233,6 +274,9 @@ model PaperItem {
   question       QuestionBankItem @relation(fields: [questionId], references: [id])
   questionId     String
   position       Int
+  // The approved marking scheme as it stood at publish time. Scripts for this
+  // paper are marked against this, so later edits in the bank can't change them.
+  markingSnapshot Json?
 }
 
 // The candidate roster for a session — who's registered to sit its exams.
@@ -253,6 +297,7 @@ model Candidate {
   createdAt  DateTime @default(now())
 
   scriptAnswers TheoryScriptAnswer[]
+  venueResults  VenueResult[]
 
   @@unique([sessionId, armyNumber])
 }
@@ -268,6 +313,9 @@ model ExamPackage {
   storagePath    String
   checksumSha256 String
   poolSize       Int
+  // HMAC key carried inside the encrypted package; the venue signs its results
+  // file with it so an import can be checked for tampering.
+  resultsKeyHex  String?
   builtAt        DateTime     @default(now())
   builtBy        String
 }
@@ -312,6 +360,8 @@ model TheoryScriptAnswer {
   aiJustification String?
   aiModel         String?
   aiError         String?
+  // [{point, awarded, max, evidence}] per key point of the scheme.
+  aiBreakdown     Json?
 
   instructorScore Float?
   instructorNotes String?
@@ -321,7 +371,48 @@ model TheoryScriptAnswer {
   status    ScriptAnswerStatus @default(UPLOADED)
   updatedAt DateTime           @updatedAt
 
+  events TheoryMarkEvent[]
+
   @@unique([paperVersionId, candidateId, questionId])
+}
+
+model TheoryMarkEvent {
+  id            String             @id @default(cuid())
+  answer        TheoryScriptAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  answerId      String
+  kind          MarkEventKind
+  score         Float?
+  previousScore Float?
+  model         String?
+  actor         String
+  reason        String?
+  createdAt     DateTime           @default(now())
+
+  @@index([answerId])
+}
+
+// One candidate's objective result as signed by the venue exam server and
+// imported here; theory marks come from TheoryScriptAnswer.
+model VenueResult {
+  id               String       @id @default(cuid())
+  paperVersion     PaperVersion @relation(fields: [paperVersionId], references: [id])
+  paperVersionId   String
+  serviceNumber    String
+  candidate        Candidate?   @relation(fields: [candidateId], references: [id])
+  candidateId      String?
+  submittedAt      DateTime
+  reference        String
+  responseHash     String
+  objectiveCorrect Int
+  objectiveTotal   Int
+  // [{questionId, type, correct, answered}] for item analysis.
+  items            Json
+  centre           String
+  importedBy       String
+  importedAt       DateTime     @default(now())
+  sourceSha256     String
+
+  @@unique([paperVersionId, serviceNumber])
 }
 
 // A bulk-uploaded page whose answer-sheet QR code couldn't be read or didn't

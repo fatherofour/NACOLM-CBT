@@ -237,6 +237,7 @@ sign in as, and the `curl` that opens the paper.
 | POST | `/unlock`, `/allow-move` | `{"service_number"}` (signed in) |
 | POST | `/extend` | `{"service_number","minutes","reason"}` (signed in) |
 | GET | `/incidents.csv` | the sitting's incident log (signed in) |
+| GET | `/results.json` | the signed results file for the portal: each submitted candidate's objective score and per-question answers, HMAC-signed with the key carried in the package (signed in) |
 
 ### Other endpoints
 

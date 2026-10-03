@@ -23,12 +23,14 @@ import (
 
 const testExam = "kiosk-test-exam"
 
+var testResultsKey = strings.Repeat("ab", 32)
+
 // writePackage encrypts a small pool the same way central-api does.
 func writePackage(t *testing.T, dir, publish string) (string, string) {
 	t.Helper()
 	i := func(v int) *int { return &v }
 	model := "security access dispersion"
-	pkg := models.ExamPackage{ExamID: testExam, Title: "Kiosk test paper", DurationMinutes: 30, QuestionsPerCandidate: 3, PublishMode: publish,
+	pkg := models.ExamPackage{ExamID: testExam, Title: "Kiosk test paper", DurationMinutes: 30, QuestionsPerCandidate: 3, PublishMode: publish, ResultsKeyHex: testResultsKey, TheoryOnPaper: 2,
 		Pool: []models.PoolItem{
 			{ID: "a", Type: "mcq", Topic: "T", Stem: "Pick B", Options: []string{"A", "B", "C"}, CorrectIndex: i(1)},
 			{ID: "b", Type: "mcq", Topic: "T", Stem: "Pick A", Options: []string{"A", "B"}, CorrectIndex: i(0)},

@@ -193,13 +193,16 @@
                 h('div', { class: 'wide' }, h('dt', { text: 'Paper' }), h('dd', { text: p ? p.title : 'Waiting for the invigilator to open the paper' })),
                 p ? h('div', {}, h('dt', { text: 'Time allowed' }), h('dd', { text: p.duration_minutes + ' minutes' })) : null,
                 p ? h('div', {}, h('dt', { text: 'Questions' }), h('dd', { text: p.questions + ' (' + [p.objective ? p.objective + ' objective' : '', p.theory ? p.theory + ' theory' : ''].filter(Boolean).join(', ') + ')' })) : null,
+                p && p.theory_on_paper ? h('div', { class: 'wide' }, h('dt', { text: 'Theory' }), h('dd', { text: p.theory_on_paper + ' question' + (p.theory_on_paper === 1 ? '' : 's') + ' on your paper answer sheets' })) : null,
                 p ? h('div', { class: 'wide' }, h('dt', { text: 'Results' }), h('dd', { text: hold ? 'Released later by your instructor' : 'Shown when you submit' })) : null)),
             h('section', { class: 'card' },
               h('h2', { text: 'Instructions' }),
               h('ul', { class: 'rules' },
                 h('li', { text: 'Answer every question. There is no penalty for a wrong objective answer.' }),
                 h('li', { text: 'Objective questions: choose one option. You can change it until you submit. Keys A to D also choose an option.' }),
-                h('li', { text: 'Theory questions: type your answer in full sentences. Answers under ' + MIN_WORDS + ' words score zero.' }),
+                p && p.theory_on_paper
+                  ? h('li', { text: 'Theory: answer your ' + p.theory_on_paper + ' theory question' + (p.theory_on_paper === 1 ? '' : 's') + ' on the answer sheets on your desk, not on this computer. Hand every sheet to the invigilator at the end.' })
+                  : h('li', { text: 'Theory questions: type your answer in full sentences. Answers under ' + MIN_WORDS + ' words score zero.' }),
                 h('li', { text: 'Your answers save automatically as you go, even if the network drops.' }),
                 h('li', { text: 'Use the question numbers on the right to move around. Flag any question you want to come back to.' }),
                 h('li', { text: 'The timer starts when you press Start. When it reaches zero, your answers are submitted for you.' }),
@@ -297,7 +300,7 @@
           h('span', { class: 'muted', text: 'Objective score' }),
           h('span', { class: 'big', text: pct + '%' }),
           h('span', { text: r.objective_correct + ' of ' + r.objective_total + ' objective questions correct' }),
-          r.theory ? h('span', { class: 'muted', text: 'Your ' + r.theory + ' theory answer' + (r.theory === 1 ? ' is' : 's are') + ' marked separately and added when your full result is released.' }) : null);
+          r.theory || r.theory_on_paper ? h('span', { class: 'muted', text: 'Your theory answers are marked separately and added when your full result is released.' }) : null);
       } else {
         score = h('div', { class: 'score', text: 'Your answers have been received. Your instructor will release the results; you’ll see them then.' });
       }
@@ -308,7 +311,7 @@
           h('h1', { text: S.autoSubmitted ? 'Time is up. Answers submitted' : 'Answers submitted' }),
           h('p', { class: 'muted', text: (at ? 'Submitted at ' + at + '. ' : '') + (r.reference ? 'Reference ' + r.reference + '.' : '') }),
           score,
-          h('p', { class: 'stay', text: 'Stay seated until the invigilator tells you to leave.' }),
+          h('p', { class: 'stay', text: r.theory_on_paper ? 'Stay seated. Hand in all your theory answer sheets when the invigilator asks.' : 'Stay seated until the invigilator tells you to leave.' }),
           h('span', { class: 'muted', id: 'signout-note', text: 'This computer signs you out in ' + secs + ' seconds.' }))));
     },
   };

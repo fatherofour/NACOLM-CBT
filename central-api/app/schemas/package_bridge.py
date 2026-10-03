@@ -36,6 +36,11 @@ class BuildFromPaperRequest(BaseModel):
     questions_per_candidate: int
     publish_mode: PublishMode
     pool: list[PoolItemIn]
+    # Theory answered on paper: how many theory questions the kiosk should tell
+    # candidates to answer on their answer sheets (they are not in the pool).
+    theory_on_paper: int = 0
+    # HMAC key the venue signs its results file with; travels only inside the encrypted package.
+    results_key_hex: str | None = None
 
 
 class BuildFromPaperResponse(BaseModel):

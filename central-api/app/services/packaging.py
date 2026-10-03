@@ -22,6 +22,8 @@ def serialize_payload(
     questions_per_candidate: int,
     publish_mode: str,
     pool: list[dict],
+    theory_on_paper: int = 0,
+    results_key_hex: str | None = None,
 ) -> bytes:
     """The plaintext package payload, built from plain dicts rather than ORM
     objects — this is what both the direct exam-pool path (build_package,
@@ -38,7 +40,10 @@ def serialize_payload(
         "questions_per_candidate": questions_per_candidate,
         "publish_mode": publish_mode,
         "pool": pool,
+        "theory_on_paper": theory_on_paper,
     }
+    if results_key_hex:
+        payload["results_key_hex"] = results_key_hex
     return json.dumps(payload).encode("utf-8")
 
 

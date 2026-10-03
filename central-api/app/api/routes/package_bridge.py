@@ -33,6 +33,8 @@ def build_from_paper(payload: BuildFromPaperRequest) -> BuildFromPaperResponse:
         questions_per_candidate=payload.questions_per_candidate,
         publish_mode=payload.publish_mode.value,
         pool=[item.model_dump() for item in payload.pool],
+        theory_on_paper=payload.theory_on_paper,
+        results_key_hex=payload.results_key_hex,
     )
 
     envelope, key = build_package_from_payload(payload.exam_id, plaintext)

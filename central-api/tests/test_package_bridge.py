@@ -88,3 +88,12 @@ def test_download_refuses_unknown_and_unsafe_ids(client):
     assert client.get("/package-bridge/packages/..%2Fsecrets").status_code in (400, 404)
     no_token = client.get("/package-bridge/packages/paperversion-123", headers={"X-Service-Token": ""})
     assert no_token.status_code == 401
+
+
+def test_package_carries_theory_on_paper_and_results_key(client):
+    body = client.post("/package-bridge/build", json={**_payload(), "theory_on_paper": 2, "results_key_hex": "ab" * 32}).json()
+    raw = json.loads(open(body["storage_path"], "rb").read())
+    envelope = crypto.Envelope.from_json(json.dumps(raw))
+    plaintext = json.loads(crypto.decrypt(envelope, bytes.fromhex(body["release_key_hex"]), aad=b"paperversion-123"))
+    assert plaintext["theory_on_paper"] == 2
+    assert plaintext["results_key_hex"] == "ab" * 32

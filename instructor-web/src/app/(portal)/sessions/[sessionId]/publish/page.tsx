@@ -45,23 +45,25 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
   const latest = paper?.versions[0];
   const approved = d?.questions.filter((q) => q.status === 'APPROVED') ?? [];
   const pending = d?.questions.filter((q) => q.status === 'DRAFT').length ?? 0;
-  const theoryNoScheme = approved.filter((q) => q.type === 'THEORY' && !q.markingScheme).length;
+  const theoryCount = approved.filter((q) => q.type === 'THEORY').length;
+  // Nothing the AI drafted counts until an instructor approves the scheme.
+  const theoryNoScheme = approved.filter((q) => q.type === 'THEORY' && q.markingScheme?.status !== 'APPROVED').length;
   const gaps = d?.coverage.filter((r) => r.gap > 0) ?? [];
   // Publishing and packaging: the exam officer or an admin.
   const isOfficer = user.role === 'EXAM_OFFICER' || user.role === 'ADMIN';
   const blocked = pending
     ? `${pending} question${pending === 1 ? ' is' : 's are'} still pending review.`
     : theoryNoScheme
-      ? `${theoryNoScheme} approved theory question${theoryNoScheme === 1 ? ' has' : 's have'} no marking scheme.`
+      ? `${theoryNoScheme} theory question${theoryNoScheme === 1 ? ' has' : 's have'} no approved marking scheme. Open ${theoryNoScheme === 1 ? 'it' : 'each'} in review, check the scheme and approve it.`
       : !approved.length
         ? 'There are no approved questions to publish.'
         : '';
 
-  async function publish(examDate: string) {
+  async function publish(examDate: string, theoryOnPaper: boolean) {
     setBusy(true);
     setError('');
     try {
-      await api.post('/papers/publish', { sessionId, title, confirmationPhrase: title, examDate });
+      await api.post('/papers/publish', { sessionId, title, confirmationPhrase: title, examDate, theoryOnPaper });
       setAgain(false);
       await data.reload();
     } catch (e) {
@@ -133,6 +135,7 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
                 summary={[['Questions', String(approved.length)], ['Coverage gaps', String(gaps.length)], ['Published by', `${user.rank} ${user.fullName}`]]}
                 blockedReason={blocked || undefined}
                 busy={busy}
+                theoryCount={theoryCount}
                 onPublish={publish}
               />
             ) : (

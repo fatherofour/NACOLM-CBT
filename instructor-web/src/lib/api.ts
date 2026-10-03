@@ -53,9 +53,16 @@ export interface ManagedUser extends User { active: boolean; createdAt: string }
 export interface Session { id: string; courseId: string; label: string; createdAt: string }
 export interface Course { id: string; code: string; name: string; sessions: Session[]; createdAt: string }
 export type QStatus = 'DRAFT' | 'APPROVED' | 'REJECTED';
-export interface ConceptGroup { canonicalTerm: string; synonyms: string[]; marks: number; required: boolean }
+export interface ConceptGroup { canonicalTerm: string; synonyms: string[]; marks: number; required: boolean; notes?: string | null }
+export interface SampleAnswer { label: string; text: string }
+export interface PointMark { point: string; awarded: number; max: number; evidence: string }
+export interface SchemeTestResult { label: string; score: number; max: number; points: PointMark[]; justification: string }
 export interface MarkingScheme {
   id?: string; totalMarks: number; ceilingPercent: number; minWordCount: number; reusedFromBank?: boolean; conceptGroups: ConceptGroup[];
+  modelAnswer?: string | null; partialCreditNotes?: string | null; zeroCreditNotes?: string | null;
+  sampleAnswers?: SampleAnswer[] | null; testResults?: SchemeTestResult[] | null; testedAt?: string | null;
+  aiTask?: 'drafting' | 'testing' | null; aiTaskError?: string | null;
+  status?: 'DRAFT' | 'APPROVED'; approvedBy?: string | null; approvedAt?: string | null;
 }
 export interface Question {
   id: string; sessionId: string; topic: string; difficulty: string; type: 'OBJECTIVE' | 'THEORY';
@@ -147,6 +154,7 @@ export interface ScriptAnswer {
   aiJustification: string | null;
   aiModel: string | null;
   aiError: string | null;
+  aiBreakdown: PointMark[] | null;
   instructorScore: number | null;
   instructorNotes: string | null;
   reviewedBy: string | null;
@@ -156,6 +164,56 @@ export interface ScriptAnswer {
   candidate: Candidate;
   question: { id: string; topic: string; body: string };
 }
+
+export interface MarkEvent {
+  id: string;
+  kind: 'AI_PROPOSED' | 'CONFIRMED' | 'CHANGED' | 'PUBLISHED' | 'CORRECTED';
+  score: number | null;
+  previousScore: number | null;
+  model: string | null;
+  actor: string;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface ResultsRow {
+  candidateId: string;
+  armyNumber: string;
+  rank: string;
+  fullName: string;
+  objective: { correct: number; total: number; submittedAt: string; reference: string; centre: string } | null;
+  theory: { score: number; max: number; marked: number; expected: number; published: number };
+  total: number;
+  max: number;
+  percent: number | null;
+  complete: boolean;
+  passed: boolean | null;
+}
+
+export interface ItemStat {
+  questionId: string;
+  answeredBy: number;
+  difficulty: number;
+  discrimination: number | null;
+  flags: string[];
+  question: { position: number; topic: string; body: string } | null;
+}
+
+export interface ResultsSummary {
+  paperTitle: string;
+  versionNumber: number;
+  passMark: number;
+  theoryOnPaper: boolean;
+  objectiveCount: number;
+  theoryCount: number;
+  theoryMax: number;
+  imported: number;
+  unmatched: string[];
+  rows: ResultsRow[];
+  itemAnalysis: ItemStat[];
+}
+
+export interface ImportSummary { centre: string; imported: number; unchanged: number; conflicts: string[]; unmatched: string[]; notSubmitted: string[] }
 
 export interface ScriptQueue {
   running: { id: string; stage: 'ocr' | 'mark'; model: string; startedAt: string } | null;

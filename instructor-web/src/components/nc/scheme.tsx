@@ -18,11 +18,15 @@ export function ConceptGroupEditor({ group, onChange, onRemove, index }: { group
       </div>
       <label className="nc-field nc-cg-marks">
         <span className="label">Marks</span>
-        <input type="number" min={0} value={group.marks} onChange={(e) => set('marks')(Math.max(0, parseInt(e.target.value || '0', 10)))} />
+        <input type="number" min={0} step={0.25} value={group.marks} onChange={(e) => set('marks')(Math.max(0, Number(e.target.value || '0')))} />
       </label>
       <div className="nc-cg-req" title="If missing, the question's score is capped even if other groups match.">
         <Switch checked={group.required} onChange={set('required')} label="Required" />
       </div>
+      <label className="nc-field nc-cg-notes">
+        <span className="label">Part marks (optional)</span>
+        <input value={group.notes ?? ''} placeholder="e.g. half if named but not explained" onChange={(e) => set('notes')(e.target.value)} />
+      </label>
       <button type="button" className="nc-cg-remove" aria-label={`Remove group ${group.canonicalTerm || index + 1}`} onClick={onRemove}>
         <Glyph name="cross" />
       </button>

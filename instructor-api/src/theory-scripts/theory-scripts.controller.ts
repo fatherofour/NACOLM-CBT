@@ -19,6 +19,7 @@ import { readFile } from 'node:fs/promises';
 import { TheoryScriptsService } from './theory-scripts.service.js';
 import { ReviewScriptAnswerDto } from './dto/review-script-answer.dto.js';
 import { AssignScanDto } from './dto/assign-scan.dto.js';
+import { CorrectMarkDto } from './dto/correct-mark.dto.js';
 import { CurrentUser, Roles, actorName, type SessionUser } from '../auth/decorators.js';
 import type { ScriptAnswerStatus } from '../generated/prisma/enums.js';
 
@@ -151,8 +152,20 @@ export class TheoryScriptsController {
   }
 
   @Post('publish')
-  publish(@Query('paperVersionId') paperVersionId: string) {
+  publish(@Query('paperVersionId') paperVersionId: string, @CurrentUser() user: SessionUser) {
     if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
-    return this.scripts.publish(paperVersionId);
+    return this.scripts.publish(paperVersionId, actorName(user));
+  }
+
+  @Get(':id/events')
+  events(@Param('id') id: string) {
+    return this.scripts.events(id);
+  }
+
+  // Correcting a published mark is the exam officer's or an admin's call, and always needs a reason.
+  @Post(':id/correct')
+  @Roles('EXAM_OFFICER', 'ADMIN')
+  correct(@Param('id') id: string, @Body() dto: CorrectMarkDto, @CurrentUser() user: SessionUser) {
+    return this.scripts.correct(id, dto, actorName(user));
   }
 }

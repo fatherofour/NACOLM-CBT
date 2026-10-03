@@ -18,8 +18,8 @@ type PoolItem struct {
 }
 
 type Rubric struct {
-	Criterion string `json:"criterion"`
-	Points    int    `json:"points"`
+	Criterion string  `json:"criterion"`
+	Points    float64 `json:"points"` // halves are common on NACOLM papers
 }
 
 // ExamPackage is the full decrypted payload for one exam.
@@ -31,6 +31,11 @@ type ExamPackage struct {
 	QuestionsPerCandidate int        `json:"questions_per_candidate"`
 	PublishMode           string     `json:"publish_mode"` // "immediate" | "instructor_controlled"
 	Pool                  []PoolItem `json:"pool"`
+	// Theory questions answered on paper answer sheets, not at the kiosk (they
+	// are not in Pool); the kiosk tells candidates how many.
+	TheoryOnPaper int `json:"theory_on_paper"`
+	// HMAC key for signing the results file the invigilator exports.
+	ResultsKeyHex string `json:"results_key_hex"`
 }
 
 // CandidateQuestion is one question exactly as a specific candidate sees it,

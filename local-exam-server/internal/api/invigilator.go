@@ -54,6 +54,7 @@ func (s *Server) registerInvigilator(mux *http.ServeMux) {
 	mux.HandleFunc("GET /invigilator/api/candidates", s.withInvigilator(s.invigilatorCandidates))
 	mux.HandleFunc("GET /invigilator/api/events", s.withInvigilator(s.invigilatorEvents))
 	mux.HandleFunc("GET /invigilator/api/incidents.csv", s.withInvigilator(s.invigilatorIncidentsCSV))
+	mux.HandleFunc("GET /invigilator/api/results.json", s.withInvigilator(s.invigilatorResults))
 	mux.HandleFunc("POST /invigilator/api/unlock", s.withInvigilator(s.invigilatorUnlock))
 	mux.HandleFunc("POST /invigilator/api/allow-move", s.withInvigilator(s.invigilatorAllowMove))
 	mux.HandleFunc("POST /invigilator/api/extend", s.withInvigilator(s.invigilatorExtend))

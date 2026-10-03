@@ -16,7 +16,9 @@ flowchart TD
   D --> E["Set the blueprint: counts, topics, difficulty, release time"]
   E --> F["Build the question set: bank questions plus AI drafts"]
   F --> G{"Review each question"}
-  G -->|Approve or edit| H["Check topic coverage"]
+  G -->|Approve or edit| G2["Theory: write a model answer; AI drafts key points, variations and sample answers"]
+  G2 --> G3{"Test the scheme on the samples, then approve it"}
+  G3 --> H["Check topic coverage"]
   G -->|Reject| F
   H --> I["Add candidates and issue PINs"]
   I --> J["Exam officer or admin publishes the paper and builds the package"]
@@ -31,20 +33,22 @@ flowchart TD
   Q --> R{"All scripts confirmed?"}
   R -->|No| P
   R -->|Yes| S["Publish confirmed results"]
-  S --> T["Published marks are locked"]
+  S --> T["Published marks are locked; corrections are recorded with a reason"]
+  T --> U["Exam officer imports the venue's signed results file: objective plus theory = final result"]
 
   classDef step fill:#e8ebe4,stroke:#6b7563,color:#1d2318
   classDef human fill:#f6e3b4,stroke:#a9873a,color:#2b2110
   classDef auto fill:#d5e3ef,stroke:#5d86a8,color:#14212e
   classDef hand fill:#e6d9ee,stroke:#8a6a9c,color:#25182d
-  class A,B,C,E,F,H,I,K,L,M,Q,S,T step
-  class G,P,R human
-  class D,N,O auto
+  class A,B,C,E,F,H,I,K,L,M,Q,S,T,U step
+  class G,G3,P,R human
+  class D,G2,N,O auto
   class J hand
 ```
 
 - **The AI never decides.** The proposed score (qwen3:4b) is pre-filled, but the instructor's confirmed score is the one recorded. Re-running the AI clears any earlier confirmation. A slower second opinion from deepseek-r1 is one click away.
 - **Bulk marking runs in the background.** Every waiting script is read first, then all are marked, so each model loads once. On the current server that is about 3 minutes per answer; the page shows how many are waiting and roughly when it will finish.
+- **Approved schemes only.** A theory question can't go on a published paper until an instructor has approved its marking scheme; publishing freezes that scheme with the paper. The AI marks against it point by point, and a mark that differs from the AI's needs a reason.
 - **QR-coded answer sheets.** Print them from the Theory scripts page: one sheet per candidate, question and page, each with a code. Upload the scanned pages in any order; pages of the same answer are kept together and turned upright. Pages without a readable code wait in a list for a person to file.
 - **Answers are treated as data.** Text in a scan that tries to instruct the marker is ignored, and the review screen shows a warning on the justification.
 

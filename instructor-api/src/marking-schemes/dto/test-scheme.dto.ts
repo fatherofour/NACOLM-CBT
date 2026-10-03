@@ -1,10 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsArray, IsInt, IsNumber, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
 import { ConceptGroupDto } from './concept-group.dto.js';
 
 class InlineSchemeDto {
-  @IsInt()
-  @Min(1)
+  @IsNumber()
+  @Min(0.5)
   totalMarks!: number;
 
   @IsInt()

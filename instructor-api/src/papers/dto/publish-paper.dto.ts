@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsOptional, IsPositive, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsOptional, IsPositive, IsString, Min, MinLength } from 'class-validator';
 
 export class PublishPaperDto {
   @IsString()
@@ -38,4 +38,9 @@ export class PublishPaperDto {
   @IsOptional()
   @Min(0)
   passMark?: number;
+
+  // Theory written on QR answer sheets (default) rather than typed at the kiosk.
+  @IsOptional()
+  @IsBoolean()
+  theoryOnPaper?: boolean;
 }

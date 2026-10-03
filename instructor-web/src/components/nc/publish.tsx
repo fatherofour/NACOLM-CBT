@@ -10,6 +10,7 @@ export function PublishConfirm({
   summary,
   blockedReason,
   busy,
+  theoryCount = 0,
   onPublish,
 }: {
   paperName: string;
@@ -18,10 +19,12 @@ export function PublishConfirm({
   summary: [string, string][];
   blockedReason?: string;
   busy?: boolean;
-  onPublish: (examDate: string) => void;
+  theoryCount?: number;
+  onPublish: (examDate: string, theoryOnPaper: boolean) => void;
 }) {
   const [typed, setTyped] = useState('');
   const [examDate, setExamDate] = useState('');
+  const [onPaper, setOnPaper] = useState(true);
   const ok = typed.trim().toLowerCase() === phrase.trim().toLowerCase() && !!examDate;
   return (
     <div className="nc-freeze">
@@ -48,6 +51,15 @@ export function PublishConfirm({
           <p className="m-0 -mt-2 text-[13px] text-ink-muted">
             For your own record — the invigilator still opens the exam at the venue when ready; this doesn’t control candidate access.
           </p>
+          {theoryCount ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={onPaper} onChange={(e) => setOnPaper(e.target.checked)} className="mt-1" />
+              <span>
+                Candidates write the {theoryCount} theory question{theoryCount === 1 ? '' : 's'} on paper answer sheets. The exam computers show only the objective
+                questions and tell candidates to use their sheets. Untick to have theory typed at the computer instead.
+              </span>
+            </label>
+          ) : null}
           <label className="label">
             <span>
               Type <code>{phrase}</code> to confirm
@@ -57,7 +69,7 @@ export function PublishConfirm({
         </>
       )}
       <div className="nc-row">
-        <Button variant="danger" icon="lock" disabled={!ok || !!blockedReason || busy} onClick={() => onPublish(examDate)}>
+        <Button variant="danger" icon="lock" disabled={!ok || !!blockedReason || busy} onClick={() => onPublish(examDate, onPaper)}>
           Publish paper
         </Button>
       </div>

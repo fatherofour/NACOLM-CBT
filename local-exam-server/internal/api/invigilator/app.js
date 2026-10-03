@@ -134,7 +134,8 @@
         ' · ' + (st.lock_after ? 'exam pauses after ' + st.lock_after + ' warnings' : 'pausing turned off') + (st.seb_required ? ' · Safe Exam Browser required' : '') }),
       summary(),
       h('div', { class: 'toolbar' }, search,
-        h('a', { class: 'btn small', href: '/invigilator/api/incidents.csv', download: 'incidents.csv', text: 'Download incident log (CSV)' })),
+        h('a', { class: 'btn small', href: '/invigilator/api/incidents.csv', download: 'incidents.csv', text: 'Download incident log (CSV)' }),
+        h('a', { class: 'btn small primary', href: '/invigilator/api/results.json', download: 'results.json', title: 'Signed results for the exam officer to import into the portal', text: 'Download results file' })),
       h('div', { class: 'tablewrap' }, table));
   }
 
