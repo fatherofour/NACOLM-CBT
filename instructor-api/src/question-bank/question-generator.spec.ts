@@ -5,6 +5,8 @@ describe('question generator', () => {
     const p = generatePrompt({ body: 'List the 4Ds.', topic: 'Logistics planning', totalMarks: 4, modelAnswer: 'Destination, duration, demand, distance.' });
     expect(p).toContain('Destination, duration, demand, distance.');
     expect(p).toContain('do not introduce anything it does not contain');
+    expect(p).toContain('Never mention "the model answer"');
+    expect(p).toContain('must answer the NEW question');
   });
 
   it('reads the model reply and keeps sensible marks', () => {

@@ -27,7 +27,12 @@ Its model answer from the department's marking scheme:
 ${seed.modelAnswer}
 """
 
-Write ONE new theory question that tests the same knowledge but is not a copy. Change the angle: a different command word (explain, compare, apply, justify), a different combination of the points, or apply the points to a short military logistics scenario. Use only the facts in the model answer above; do not introduce anything it does not contain. Keep the marks close to the original and write a model answer in the same style, with the marks for each point.
+Write ONE new theory question that tests the same knowledge but is not a copy. Change the angle: a different command word (explain, compare, apply, justify), a different combination of the points, or apply the points to a short military logistics scenario. Use only the facts in the model answer above; do not introduce anything it does not contain.
+
+Rules:
+- The question must stand on its own for a candidate in the exam hall. Never mention "the model answer", "the list above", "the past question" or anything the candidate cannot see; name the points or the topic instead.
+- The new model answer must answer the NEW question. If the question asks how or why, explain each point in that context; do not just repeat the old list.
+- Keep the marks close to the original and say in the model answer how the marks are shared between the points.
 
 Respond with ONLY JSON of this exact shape:
 {"question": "...", "marks": 0, "modelAnswer": "..."}`;
