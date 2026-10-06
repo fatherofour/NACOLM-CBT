@@ -1,3 +1,4 @@
+import { Roles } from '../auth/decorators.js';
 import {
   BadRequestException,
   Body,
@@ -27,10 +28,12 @@ export class DocumentsController {
     @Body('title') title: string,
   ) {
     if (!file) throw new BadRequestException('file is required');
-    if (!/\.(pdf|docx)$/i.test(file.originalname)) {
-      throw new BadRequestException('Only PDF and DOCX files can be uploaded.');
-    }
     if (!sessionId || !docType || !title) throw new BadRequestException('sessionId, docType and title are required');
+    // Photos of handwritten past papers are read by the AI; study material must be a document.
+    const allowed = docType === 'PAST_PAPER' ? /\.(pdf|docx|jpe?g|png)$/i : /\.(pdf|docx)$/i;
+    if (!allowed.test(file.originalname)) {
+      throw new BadRequestException(docType === 'PAST_PAPER' ? 'Upload a PDF, Word file, or a JPEG/PNG photo of the paper.' : 'Only PDF and DOCX files can be uploaded.');
+    }
     return this.documents.upload(sessionId, docType, title, file);
   }
 
@@ -59,6 +62,7 @@ export class DocumentsController {
   // re-running it by hand (e.g. after the automatic pass failed, or to redo
   // it having deleted the draft items it made the first time).
   @Post(':id/extract-questions')
+  @Roles('INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN')
   extractQuestions(@Param('id') id: string) {
     return this.documents.extractPastPaperQuestions(id);
   }

@@ -1,4 +1,5 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -7,19 +8,39 @@ const slug = (s: string) => s.trim().replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AiGenerationService } from '../ai-generation/ai-generation.service.js';
 import type { DocumentType } from '../generated/prisma/enums.js';
-import { extractText } from './extract-text.js';
+import { extractText, hasUsableText, pageImages } from './extract-text.js';
 import { parsePastPaperText } from './past-paper-parser.js';
+import { looksLikeMarkingScheme, parseMarkingScheme } from './marking-scheme-parser.js';
+import { OllamaService } from '../ollama/ollama.service.js';
+import { AiQueueService } from '../ai-queue/ai-queue.service.js';
+import { KEEP_ALIVE, OCR_MODEL } from '../ai-queue/models.js';
+
+// Question papers have small print and dense handwriting; read them a little
+// larger than single answers.
+const PAPER_OCR_MAX_PX = Number(process.env.PAPER_OCR_MAX_PX ?? 1400);
+
+const PAPER_OCR_PROMPT = `This is one page of an exam question paper or marking scheme. It may be printed, handwritten, or both. Transcribe every line of text from top to bottom exactly as written. Keep question numbers (1., 2., 15.), sub-part letters (a., b.), roman numerals (i., ii.), headings such as SOLUTION, and marks in brackets such as (4 marks) exactly as they appear. Put each question, sub-part and list item on its own line. Do not summarise, correct or add anything. Output only the transcription.`;
 
 const STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT ?? './data/documents';
 
 @Injectable()
-export class DocumentsService {
+export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly aiGeneration: AiGenerationService,
-  ) {}
+    private readonly ollama: OllamaService,
+    private readonly queue: AiQueueService,
+  ) {
+    this.queue.register('paper-ocr', (id, model) => this.readPaper(id, model));
+  }
+
+  /** Papers the AI was still reading when the server restarted go back in the queue. */
+  async onModuleInit() {
+    const reading = await this.prisma.sourceDocument.findMany({ where: { extraction: 'reading' }, select: { id: true } });
+    for (const d of reading) this.queue.add({ id: `paper:${d.id}`, target: d.id, kind: 'paper-ocr', stage: 'ocr', model: OCR_MODEL });
+  }
 
   /**
    * Where a file for this session and type is saved on the server:
@@ -76,7 +97,7 @@ export class DocumentsService {
     if (docType === 'PAST_PAPER') {
       try {
         const extracted = await this.extractPastPaperQuestions(document.id);
-        return { ...document, extractedQuestions: extracted.created };
+        return { ...document, extractedQuestions: extracted.created, reading: extracted.reading };
       } catch (err) {
         this.logger.error(`failed to extract questions from ${document.id}: ${String(err)}`);
       }
@@ -86,19 +107,91 @@ export class DocumentsService {
   }
 
   /**
-   * Deterministic (no AI) extraction of individual questions from an
-   * uploaded past paper — see past-paper-parser.ts for how. Every question
-   * lands as a DRAFT, same as an AI-drafted one, so nothing reaches a paper
-   * without going through the normal review/approve flow; a two-column
-   * layout or unusual format just means a lower-quality draft to review or
-   * reject, never a silent wrong answer sneaking onto a real exam.
+   * Turns an uploaded past paper into DRAFT bank questions. Typed papers are
+   * parsed straight away: a marking scheme (questions with SOLUTION blocks)
+   * becomes theory questions with model answers and draft marking schemes;
+   * an ordinary paper goes through the question/answer-key parser. A paper
+   * with no usable text (handwritten, scanned or photographed) is read by the
+   * AI in the background first. Nothing reaches a paper without review.
    */
   async extractPastPaperQuestions(documentId: string) {
     const doc = await this.prisma.sourceDocument.findUniqueOrThrow({ where: { id: documentId } });
     const buffer = await readFile(doc.storagePath);
     const text = await extractText(buffer, doc.storagePath);
-    const parsed = parsePastPaperText(text);
+    if (!hasUsableText(text)) {
+      this.queue.assertRoom();
+      await this.prisma.sourceDocument.update({ where: { id: documentId }, data: { extraction: 'reading', extractionNote: null } });
+      this.queue.add({ id: `paper:${documentId}`, target: documentId, kind: 'paper-ocr', stage: 'ocr', model: OCR_MODEL });
+      return { created: 0, reading: true };
+    }
+    const created = await this.createQuestions(doc, text);
+    await this.prisma.sourceDocument.update({ where: { id: documentId }, data: { extraction: 'done', extractedCount: created, extractionNote: null } });
+    return { created, reading: false };
+  }
 
+  /** Background job: the vision model reads each page, then the text is parsed as usual. */
+  async readPaper(documentId: string, model: string) {
+    const doc = await this.prisma.sourceDocument.findUnique({ where: { id: documentId } });
+    if (!doc || doc.extraction !== 'reading') return;
+    try {
+      const pages = await pageImages(await readFile(doc.storagePath), doc.storagePath);
+      if (!pages.length) throw new Error('no pages could be read from this file');
+      const texts: string[] = [];
+      for (const page of pages) {
+        const img = await sharp(page).rotate().resize({ width: PAPER_OCR_MAX_PX, height: PAPER_OCR_MAX_PX, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+        texts.push((await this.ollama.generate({ model, prompt: PAPER_OCR_PROMPT, images: [img.toString('base64')], keepAlive: KEEP_ALIVE })).trim());
+      }
+      const transcript = texts.join('\n\n');
+      const created = await this.createQuestions(doc, transcript, true);
+      await this.prisma.sourceDocument.update({
+        where: { id: documentId },
+        data: {
+          extraction: 'done',
+          extractedCount: created,
+          transcript,
+          extractionNote: created ? `Read by the AI from ${pages.length} page${pages.length === 1 ? '' : 's'}. Check each question against the paper.` : 'The AI read the paper but no questions could be picked out. Check the transcript.',
+        },
+      });
+    } catch (err) {
+      this.logger.error(`reading past paper ${documentId} failed: ${String(err)}`);
+      await this.prisma.sourceDocument.update({ where: { id: documentId }, data: { extraction: 'failed', extractionNote: `The AI couldn’t read this paper: ${String(err).slice(0, 300)}` } });
+    }
+  }
+
+  private async createQuestions(doc: { id: string; sessionId: string; title: string }, text: string, readByAi = false) {
+    const citation = (label: string | number) => `${doc.title}, question ${label}${readByAi ? ' (read by AI from handwriting/scan)' : ''}`;
+    if (looksLikeMarkingScheme(text)) {
+      const parsed = parseMarkingScheme(text);
+      for (const q of parsed) {
+        await this.prisma.questionBankItem.create({
+          data: {
+            sessionId: doc.sessionId,
+            topic: q.topic ?? 'Uncategorized',
+            type: q.type,
+            source: 'PAST_PAPER',
+            status: 'DRAFT',
+            body: q.body,
+            options: q.options,
+            citation: citation(q.label),
+            markingScheme:
+              q.type === 'THEORY' && q.totalMarks > 0
+                ? {
+                    create: {
+                      totalMarks: q.totalMarks,
+                      minWordCount: 3,
+                      modelAnswer: q.modelAnswer,
+                      partialCreditNotes: q.markingNotes,
+                      conceptGroups: { create: q.points.map((p, i) => ({ ...p, order: i })) },
+                    },
+                  }
+                : undefined,
+          },
+        });
+      }
+      return parsed.length;
+    }
+
+    const parsed = parsePastPaperText(text);
     for (const q of parsed) {
       await this.prisma.questionBankItem.create({
         data: {
@@ -110,7 +203,7 @@ export class DocumentsService {
           body: q.body,
           options: q.options,
           correctIndex: q.correctIndex,
-          citation: `${doc.title}, question ${q.sourceNumber}`,
+          citation: citation(q.sourceNumber),
           markingScheme: q.markingScheme
             ? {
                 create: {
@@ -124,7 +217,7 @@ export class DocumentsService {
         },
       });
     }
-    return { created: parsed.length };
+    return parsed.length;
   }
 
   list(filter: { sessionId?: string; courseId?: string; docType?: DocumentType }) {

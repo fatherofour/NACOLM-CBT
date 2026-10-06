@@ -4,11 +4,28 @@ import { CreateBankItemDto } from './dto/create-bank-item.dto.js';
 import { EditQuestionDto } from './dto/edit-question.dto.js';
 import { RejectQuestionDto } from './dto/reject-question.dto.js';
 import type { QuestionStatus, QuestionType } from '../generated/prisma/enums.js';
-import { CurrentUser, actorName, type SessionUser } from '../auth/decorators.js';
+import { CurrentUser, Roles, actorName, type SessionUser } from '../auth/decorators.js';
+import { QuestionGenerationService } from './question-generation.service.js';
+import { GenerateSimilarDto } from './dto/generate-similar.dto.js';
 
 @Controller('question-bank')
 export class QuestionBankController {
-  constructor(private readonly bank: QuestionBankService) {}
+  constructor(
+    private readonly bank: QuestionBankService,
+    private readonly generator: QuestionGenerationService,
+  ) {}
+
+  // Runs the local models, so staff roles only.
+  @Post('generate-similar')
+  @Roles('INSTRUCTOR', 'EXAM_OFFICER', 'ADMIN')
+  generateSimilar(@Body() dto: GenerateSimilarDto) {
+    return this.generator.start(dto);
+  }
+
+  @Get('generate-similar/status')
+  generationStatus(@Query('sessionId') sessionId: string) {
+    return this.generator.status(sessionId) ?? { state: 'idle' };
+  }
 
   @Get()
   list(

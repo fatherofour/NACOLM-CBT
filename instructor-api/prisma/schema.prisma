@@ -138,6 +138,14 @@ model SourceDocument {
   // see AiGenerationService. Null until that hand-off succeeds.
   centralApiDocumentId String?
   uploadedAt           DateTime     @default(now())
+
+  // Past papers: turning the file into bank questions. "reading" while the AI
+  // reads a handwritten or scanned paper in the background, then "done" or "failed".
+  extraction     String?
+  extractionNote String?
+  extractedCount Int?
+  // What the AI read from a handwritten or scanned paper, kept for checking.
+  transcript     String?
 }
 
 model QuestionBankItem {

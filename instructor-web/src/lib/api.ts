@@ -73,7 +73,9 @@ export interface Question {
 export interface SourceDocument {
   id: string; sessionId: string; title: string; docType: 'PAST_PAPER' | 'STUDY_MATERIAL'; storagePath: string;
   centralApiDocumentId: string | null; uploadedAt: string; session?: Session & { course: Course };
+  extraction?: 'reading' | 'done' | 'failed' | null; extractionNote?: string | null; extractedCount?: number | null;
 }
+export interface GenerationStatus { state: 'idle' | 'queued' | 'running' | 'done' | 'failed'; requested?: number; created?: number; skippedDuplicates?: number; error?: string }
 export interface Blueprint {
   id: string; sessionId: string; targetCount: number; objectiveCount: number; theoryCount: number; sourceMode: string;
   pastQuestionRatio: number; distribution: Record<string, number> | null; pastSessionIds: string[];

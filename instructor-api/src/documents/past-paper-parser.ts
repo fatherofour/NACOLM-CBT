@@ -32,7 +32,8 @@ const OPTION_START = /^\(?([A-Ha-h])[.)]\s+(.*)$/;
 const INLINE_ANSWER = /^(?:Answer|Ans|Key)s?\s*[:.]?\s*\(?([A-Ha-h])\)?\.?\s*$/i;
 const TRUE_FALSE_MARKER = /\[\s*T\s*\/\s*F\s*\]/i;
 const BLANK_MARKER = /_{3,}/;
-const SECTION_STOP = /^(OFFICIAL\s+)?ANSWER\s+KEY|MARKING\s+SCHEME|WORKED\s+SOLUTIONS?/i;
+// Anchored: a header that merely mentions "Marking Scheme" must not end the paper.
+const SECTION_STOP = /^(?:(OFFICIAL\s+)?ANSWER\s+KEY|MARKING\s+SCHEME|WORKED\s+SOLUTIONS?)\b/i;
 // "51: Gross Vehicle Weight (GVW)" — a numbered short-answer key entry. The
 // colon/period requirement is what actually separates this from a plain
 // number-only grid row ("51 52 53 54 ..."), which never has one — no need

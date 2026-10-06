@@ -38,6 +38,14 @@ export function LibraryPage({ kind }: { kind: Kind }) {
   const sessions = useMemo(() => [...(course?.sessions ?? [])].sort((a, b) => b.label.localeCompare(a.label)), [course]);
 
   const docs = useData<SourceDocument[]>(() => (courseId ? api.get(`/documents${qs({ courseId, docType: kind })}`) : Promise.resolve([])), [courseId, kind]);
+  // A handwritten paper is read in the background; refresh until it's done.
+  const reading = docs.data?.some((d) => d.extraction === 'reading') ?? false;
+  const reloadDocs = docs.reload;
+  useEffect(() => {
+    if (!reading) return;
+    const t = setInterval(() => void reloadDocs(), 8000);
+    return () => clearInterval(t);
+  }, [reading, reloadDocs]);
   const bankCounts = useData<Record<string, number>>(async () => {
     if (kind !== 'PAST_PAPER' || !course) return {};
     const entries = await Promise.all(
@@ -79,13 +87,15 @@ export function LibraryPage({ kind }: { kind: Kind }) {
       {courses.error ? <Alert tone="error" title="Couldn’t load courses">{courses.error}</Alert> : null}
       {extractSummary != null ? (
         <Alert
-          tone={extractSummary > 0 ? 'info' : 'caution'}
-          title={extractSummary > 0 ? `${extractSummary} question${extractSummary === 1 ? '' : 's'} extracted` : 'No questions could be extracted'}
+          tone={extractSummary !== 0 ? 'info' : 'caution'}
+          title={extractSummary < 0 ? 'The AI is reading this paper' : extractSummary > 0 ? `${extractSummary} question${extractSummary === 1 ? '' : 's'} extracted` : 'No questions could be extracted'}
           action={<Button variant="quiet" onClick={() => setExtractSummary(null)}>Dismiss</Button>}
         >
-          {extractSummary > 0
-            ? 'Added to the bank as drafts, tagged with this paper and their original question number. Review and approve them from the session’s Review page before they count as available.'
-            : 'This usually means the PDF has no text layer (a scanned image) or an unusual layout. Add its questions to the bank by hand instead.'}
+          {extractSummary < 0
+            ? 'It has no typed text, so the AI on the college server is reading the handwriting page by page (a few minutes a page). The questions appear as drafts when it finishes; the status below updates by itself.'
+            : extractSummary > 0
+              ? 'Added to the bank as drafts, tagged with this paper and their original question number. A marking scheme’s model answers and marks come with each theory question. Review and approve them from the session’s Review page before they count as available.'
+              : 'This usually means an unusual layout. Add its questions to the bank by hand instead.'}
         </Alert>
       ) : null}
       {courses.data && !courses.data.length ? (
@@ -207,7 +217,12 @@ export function LibraryPage({ kind }: { kind: Kind }) {
 }
 
 function DocStatus({ d }: { d: SourceDocument }) {
-  if (d.docType === 'PAST_PAPER') return <Chip tone="approved">Stored</Chip>;
+  if (d.docType === 'PAST_PAPER') {
+    if (d.extraction === 'reading') return <Chip tone="bank">AI is reading the handwriting…</Chip>;
+    if (d.extraction === 'failed') return <span title={d.extractionNote ?? undefined}><Chip tone="rejected">Couldn’t read</Chip></span>;
+    if (d.extraction === 'done') return <span title={d.extractionNote ?? undefined}><Chip tone="approved">{d.extractedCount ?? 0} question{d.extractedCount === 1 ? '' : 's'} drafted</Chip></span>;
+    return <Chip tone="approved">Stored</Chip>;
+  }
   return d.centralApiDocumentId ? <Chip tone="approved">Ready for drafting</Chip> : <Chip tone="caution">Not indexed yet</Chip>;
 }
 
@@ -238,7 +253,8 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
   }, [sessionId, kind]);
 
   const tooBig = !!file && file.size > 50 * 1024 * 1024;
-  const badType = !!file && !/\.(pdf|docx)$/i.test(file.name);
+  // Past papers can also be photos of a handwritten paper, which the AI reads.
+  const badType = !!file && !(kind === 'PAST_PAPER' ? /\.(pdf|docx|jpe?g|png)$/i : /\.(pdf|docx)$/i).test(file.name);
   const ready = !!file && !tooBig && !badType && !!title.trim() && (sessionId !== NEW || !!newLabel.trim());
 
   async function upload() {
@@ -253,8 +269,8 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
       form.set('sessionId', sid);
       form.set('docType', kind);
       form.set('title', title.trim());
-      const uploaded = await api.upload<{ extractedQuestions?: number }>('/documents', form);
-      onUploaded(course.id, kind === 'PAST_PAPER' ? uploaded.extractedQuestions : undefined);
+      const uploaded = await api.upload<{ extractedQuestions?: number; reading?: boolean }>('/documents', form);
+      onUploaded(course.id, kind === 'PAST_PAPER' ? (uploaded.reading ? -1 : uploaded.extractedQuestions) : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.');
     } finally {
@@ -294,12 +310,12 @@ function UploadPanel({ kind, courses, initialCourseId, onClose, onUploaded }: { 
         <span className="text-[13px] text-ink-muted">{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB` : 'PDF or DOCX, up to 50 MB'}</span>
         <input
           type="file"
-          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          accept={kind === 'PAST_PAPER' ? '.pdf,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png' : '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
           className="nc-sr"
           onChange={(e) => {
             const f = e.target.files?.[0] ?? null;
             setFile(f);
-            if (f && !title) setTitle(f.name.replace(/\.(pdf|docx)$/i, ''));
+            if (f && !title) setTitle(f.name.replace(/\.(pdf|docx|jpe?g|png)$/i, ''));
           }}
         />
       </label>

@@ -1,12 +1,12 @@
 'use client';
 import Link from 'next/link';
-import { use, useMemo, useState } from 'react';
+import { use, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, EmptyState, ReviewProgress, Spinner, WizardSteps } from '@/components/nc/basics';
 import { QuestionRow, type EditPayload } from '@/components/nc/question-row';
 import { CoverageTable } from '@/components/nc/coverage';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { SchemePanel } from './scheme-panel';
-import { api, qs, type Blueprint, type CoverageRow, type Question } from '@/lib/api';
+import { api, qs, type Blueprint, type CoverageRow, type GenerationStatus, type Question } from '@/lib/api';
 import { sessionInfo } from '@/lib/session-info';
 import { useData } from '@/lib/use-data';
 
@@ -129,6 +129,8 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
               </div>
             </Panel>
 
+            <GeneratePanel sessionId={sessionId} topics={topics} theoryWithAnswers={all.some((q) => q.type === 'THEORY' && !!q.markingScheme?.modelAnswer)} onCreated={qsData.reload} />
+
             {confirmBulk ? (
               <div role="alertdialog" aria-labelledby="bulk-t" className="flex flex-col gap-3 rounded-lg border-2 border-field bg-field-soft p-4">
                 <p id="bulk-t" className="m-0 font-[650]">Approve {bulkable.length} question{bulkable.length === 1 ? '' : 's'} at once?</p>
@@ -194,5 +196,78 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
         />
       ) : null}
     </>
+  );
+}
+
+/** New theory questions written by the local AI from this session's past questions and their model answers. */
+function GeneratePanel({ sessionId, topics, theoryWithAnswers, onCreated }: { sessionId: string; topics: string[]; theoryWithAnswers: boolean; onCreated: () => Promise<void> }) {
+  const [count, setCount] = useState(5);
+  const [topic, setTopic] = useState('');
+  const [status, setStatus] = useState<GenerationStatus>({ state: 'idle' });
+  const [error, setError] = useState('');
+  const working = status.state === 'queued' || status.state === 'running';
+
+  useEffect(() => {
+    api.get<GenerationStatus>(`/question-bank/generate-similar/status${qs({ sessionId })}`).then(setStatus, () => undefined);
+  }, [sessionId]);
+  useEffect(() => {
+    if (!working) return;
+    let seen = status.created ?? 0;
+    const t = setInterval(async () => {
+      try {
+        const s = await api.get<GenerationStatus>(`/question-bank/generate-similar/status${qs({ sessionId })}`);
+        setStatus(s);
+        if ((s.created ?? 0) !== seen || s.state === 'done') {
+          seen = s.created ?? 0;
+          await onCreated();
+        }
+      } catch {
+        /* keep polling */
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [working, sessionId, onCreated, status.created]);
+
+  if (!theoryWithAnswers) return null;
+  return (
+    <Panel className="flex flex-col gap-3 p-4 md:px-5">
+      <div>
+        <h2 className="t-heading m-0">Write new questions from the past ones</h2>
+        <p className="m-0 text-sm text-ink-muted">
+          The AI on the college server takes past theory questions with model answers and writes new ones that test the same content from a different angle. They arrive as drafts with a model answer; review each one and approve its marking scheme as usual. About a minute per question.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="label w-28">How many<input type="number" min={1} max={20} value={count} disabled={working} onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value || '1'))))} /></label>
+        <label className="label min-w-[200px]">From topic
+          <select value={topic} disabled={working} onChange={(e) => setTopic(e.target.value)}>
+            <option value="">Any topic</option>
+            {topics.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+        <Button
+          variant="secondary"
+          disabled={working}
+          onClick={async () => {
+            setError('');
+            try {
+              setStatus(await api.post<GenerationStatus>('/question-bank/generate-similar', { sessionId, count, topic: topic || undefined }));
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Couldn’t start.');
+            }
+          }}
+        >
+          {working ? 'Writing questions…' : 'Write new questions'}
+        </Button>
+        {working ? <Spinner label={`${status.created ?? 0} of ${status.requested} written so far`} /> : null}
+      </div>
+      {status.state === 'done' ? (
+        <p className="m-0 text-sm">
+          Added {status.created} new draft question{status.created === 1 ? '' : 's'}{status.skippedDuplicates ? `; skipped ${status.skippedDuplicates} too close to existing ones` : ''}. They’re marked “AI-drafted” in the list below.
+        </p>
+      ) : null}
+      {status.state === 'failed' ? <Alert tone="error" title="The AI couldn’t finish">{status.error}</Alert> : null}
+      {error ? <Alert tone="error" title="Couldn’t start">{error}</Alert> : null}
+    </Panel>
   );
 }

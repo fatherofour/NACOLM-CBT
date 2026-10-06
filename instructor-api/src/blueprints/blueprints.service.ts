@@ -232,6 +232,9 @@ export class BlueprintsService {
                       totalMarks: item.markingScheme.totalMarks,
                       ceilingPercent: item.markingScheme.ceilingPercent,
                       minWordCount: item.markingScheme.minWordCount,
+                      modelAnswer: item.markingScheme.modelAnswer,
+                      partialCreditNotes: item.markingScheme.partialCreditNotes,
+                      zeroCreditNotes: item.markingScheme.zeroCreditNotes,
                       reusedFromBank: true,
                       conceptGroups: {
                         create: item.markingScheme.conceptGroups.map((g) => ({
@@ -239,6 +242,7 @@ export class BlueprintsService {
                           synonyms: g.synonyms,
                           marks: g.marks,
                           required: g.required,
+                          notes: g.notes,
                           order: g.order,
                         })),
                       },
