@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsOptional, IsString, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 
 export class DifficultyTargetsDto {
   @IsInt()
@@ -27,18 +27,23 @@ export class CreateBlueprintDto {
   @Min(0)
   pastQuestionRatio?: number;
 
+  // Not needed when following a past paper's layout (formatDocumentId).
+  @ValidateIf((o: CreateBlueprintDto) => !o.formatDocumentId)
   @IsInt()
   @Min(1)
   totalCount!: number;
 
+  @ValidateIf((o: CreateBlueprintDto) => !o.formatDocumentId)
   @IsInt()
   @Min(0)
   objectiveCount!: number;
 
+  @ValidateIf((o: CreateBlueprintDto) => !o.formatDocumentId)
   @IsInt()
   @Min(0)
   theoryCount!: number;
 
+  @ValidateIf((o: CreateBlueprintDto) => !o.formatDocumentId)
   @IsArray()
   @IsString({ each: true })
   @MinLength(1, { each: true })
@@ -59,4 +64,10 @@ export class CreateBlueprintDto {
   @IsOptional()
   @IsIn(['instant', 'hold'])
   resultsRelease?: 'instant' | 'hold';
+
+  // Follow this uploaded past paper's layout (its sections, marks and choices).
+  // The counts, mix and topics above are then taken from the paper instead.
+  @IsOptional()
+  @IsString()
+  formatDocumentId?: string;
 }

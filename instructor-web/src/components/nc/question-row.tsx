@@ -164,8 +164,8 @@ export function QuestionRow({
       ) : mode === 'view' && canAct ? (
         <div className="nc-qrow-actions">
           {q.type === 'THEORY' ? (
-            <Button variant="quiet" onClick={onScheme}>
-              {!schemeReady ? 'Set marking scheme' : q.markingScheme?.status === 'APPROVED' ? 'Marking scheme (approved)' : 'Marking scheme (draft)'}
+            <Button variant={schemeReady && q.markingScheme?.status !== 'APPROVED' && status !== 'rejected' ? 'secondary' : 'quiet'} onClick={onScheme}>
+              {!schemeReady ? 'Set marking scheme' : q.markingScheme?.status === 'APPROVED' ? 'View marking scheme (approved)' : 'Check and approve marking scheme'}
             </Button>
           ) : null}
           <span className="nc-grow" />

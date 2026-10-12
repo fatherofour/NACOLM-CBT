@@ -242,6 +242,8 @@ function QueueBar({ queue }: { queue: ScriptQueue }) {
         <b className="figure">{waiting.ocr}</b> waiting to be read · <b className="figure">{waiting.mark}</b> waiting to be marked
       </span>
       <span className="text-sm text-ink-muted">Finishes in {minutes(queue.etaSeconds)}. You can leave this page; it carries on.</span>
+      <span className="flex-1" />
+      <StopAllAi />
     </Panel>
   );
 }
@@ -834,5 +836,34 @@ function AddVariation({ script: s }: { script: ScriptAnswer }) {
       {done ? <p className="m-0 text-sm text-[var(--approved)]">{done}</p> : null}
       {error ? <Alert tone="error" title="Couldn’t add it">{error}</Alert> : null}
     </Panel>
+  );
+}
+
+/** Stops reading and marking for every script, e.g. after uploading the wrong batch. */
+function StopAllAi() {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!confirm) return <Button variant="quiet" onClick={() => setConfirm(true)}>Stop all AI work…</Button>;
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-sm">
+      Stop reading and marking? Stopped scripts can be run again with “Read again” or “Mark again”.
+      <Button
+        variant="danger"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await api.post('/ai-queue/cancel-all', {});
+            window.dispatchEvent(new Event('ai-queue-changed'));
+          } finally {
+            setBusy(false);
+            setConfirm(false);
+          }
+        }}
+      >
+        {busy ? 'Stopping…' : 'Stop all'}
+      </Button>
+      <Button variant="quiet" onClick={() => setConfirm(false)}>Keep going</Button>
+    </span>
   );
 }

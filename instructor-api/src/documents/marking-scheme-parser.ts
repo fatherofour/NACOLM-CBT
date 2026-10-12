@@ -1,9 +1,11 @@
 // Reads a NACOLM-style marking scheme: each question with its marks in
 // brackets, a "SOLUTION" heading, the model answer, and marking notes such as
-// "(each attracts one mark)" or "(2 marks for explaining each skill)". It
-// turns every question part into a bank question with a model answer and a
-// draft marking scheme. Everything lands as DRAFT for an instructor to check
-// and approve; this only saves the typing.
+// "(each attracts one mark)" or "(2 marks for explaining each skill)". Every
+// numbered question becomes one bank question with a model answer and a draft
+// marking scheme; a question set in parts (15 a–e) stays one question, its
+// parts kept together with their own marks, because candidates answer the
+// whole of it. Everything lands as DRAFT for an instructor to check and
+// approve; this only saves the typing.
 
 export interface SchemePoint {
   canonicalTerm: string;
@@ -13,8 +15,18 @@ export interface SchemePoint {
   notes: string | null;
 }
 
+export interface SchemePart {
+  label: string; // "b"
+  body: string;
+  totalMarks: number;
+  modelAnswer: string | null;
+  markingNotes: string | null;
+  points: SchemePoint[];
+}
+
 export interface SchemeQuestion {
-  label: string; // "15b"
+  label: string; // "15"
+  section: string | null; // "B"
   type: 'OBJECTIVE' | 'THEORY';
   body: string;
   totalMarks: number;
@@ -23,9 +35,40 @@ export interface SchemeQuestion {
   modelAnswer: string | null;
   markingNotes: string | null;
   points: SchemePoint[];
+  parts?: SchemePart[]; // a question set in parts, each with its own marks
 }
 
-const NOISE = /^(RESTRICTED|CONFIDENTIAL|SECRET)$|^\d{1,3}$|^--\s*\d+\s*of\s*\d+\s*--$|^SECTION\s+[A-Z]\b|^=+(\s*=)*$/i;
+/** How the paper is laid out, for checking the import against the paper itself. */
+export interface SchemeLayout {
+  sections: { letter: string; title: string | null; labels: string[]; marks: number[]; totalMarks: number }[];
+  // "3 Questions from Section B": candidates choose this many from that section.
+  choose: { count: number; section: string } | null;
+  // Question numbers skipped in the document (e.g. 8 is followed by 11).
+  missingNumbers: number[];
+  // The paper's heading, so a printed paper can follow the same template.
+  header: PaperHeader;
+}
+
+export interface PaperHeader {
+  classification: string | null; // "RESTRICTED", printed at the top and bottom of every page
+  institution: string | null;
+  department: string | null;
+  paperTitle: string | null; // "Test 1 (IE)", without "Marking Scheme"
+  course: string | null;
+  time: string | null;
+  totalMarks: string | null; // "100%"
+  // What the paper calls its total: "Total Marks" or "HPS" (highest possible score).
+  totalLabel?: string | null;
+  // "Attempt all questions", as printed under the heading.
+  instruction?: string | null;
+  subject: string | null; // "Introduction to Management"
+}
+
+const NOISE = /^(RESTRICTED|CONFIDENTIAL|SECRET)$|^\d{1,3}$|^--\s*\d+\s*of\s*\d+\s*--$|^=+(\s*=)*$/i;
+// "SECTION B - THEORY", "Section A: Objective".
+const SECTION = /^SECTION\s+([A-Z])\b\s*(?:[-–—:]\s*(.*))?$/i;
+// "… and 3 Questions from Section B": how many the candidate answers from that section.
+const CHOOSE = /\b(\d{1,2}|two|three|four|five|six)\s+questions?\s+from\s+section\s+([A-Z])\b/i;
 const SOLUTION = /^(SOLUTIONS?|ANSWERS?|MARKING\s+GUIDE|MODEL\s+ANSWER)\s*:?\s*$/i;
 const MAIN_START = /^(\d{1,3})\s*[.)]\s+(?:([a-h])\s*[.)]\s+)?(.*)$/;
 const SUB_START = /^\(?([a-h])\s*[.)]\s+(.*)$/;
@@ -56,16 +99,20 @@ function words(n: string): number | null {
 /** How many items the question asks for: "List the 4…", "Name 6 terms", "at least 5", "about 8". */
 export function requiredCount(question: string): number | null {
   const q = question.replace(/\([^)]*\)/g, ' ');
-  const m = /\b(?:the|at\s+least|about|any|list|name|state|give|mention|identify|explain)\s+(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\b/i.exec(q);
+  // "List 5 precautions", "the 10 criteria", and a bare "4 purpose of…" at the start.
+  const m = /\b(?:the|at\s+least|about|any|list|name|state|give|mention|identify|explain)\s+(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\b/i.exec(q) ?? /^\s*(\d{1,2})\s+[a-z]/i.exec(q);
   return m ? words(m[1]) : null;
 }
 
-const titleCase = (s: string) => s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\b(And|Of|The|To|In|For)\b/g, (w) => w.toLowerCase());
-const tidy = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** "LOGISTICS PLANNING TEST 1 IE" → "Logistics Planning Test 1 IE": all-capitals text in title case, keeping abbreviations. */
+export const displayCase = (s: string) =>
+  s === s.toUpperCase() ? s.split(' ').map((w) => (w.length <= 3 && /^[A-Z]+$/.test(w) && !/^(OF|AND|THE|TO|IN|FOR)$/.test(w)) || /\d/.test(w) ? w : titleCase(w)).join(' ').replace(/^./, (c) => c.toUpperCase()) : s;
+export const titleCase = (s: string) => s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\b(And|Of|The|To|In|For)\b/g, (w) => w.toLowerCase());
+export const tidy = (s: string) => s.replace(/\s+/g, ' ').trim();
 const stripNotes = (s: string) => tidy(s.replace(/\((?:[^()]*\bmarks?\b[^()]*|each attracts one mark|one mark each)\)\.?/gi, ''));
 const trimEnd = (s: string) => s.replace(/[\s.,;:]+$/, '');
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const round = (n: number) => Math.round(n * 100) / 100;
+export const round = (n: number) => Math.round(n * 100) / 100;
 
 /** Splits "Technical Skills. A technical skill is…" into the point's name and its explanation. */
 function headingOf(text: string): { name: string; explanation: string } {
@@ -75,7 +122,9 @@ function headingOf(text: string): { name: string; explanation: string } {
 }
 
 interface Part {
-  label: string;
+  main: number;
+  sub: string | null;
+  section: string | null;
   header: string[];
   answer: string[];
 }
@@ -85,12 +134,21 @@ export function looksLikeMarkingScheme(text: string): boolean {
 }
 
 export function parseMarkingScheme(raw: string): SchemeQuestion[] {
+  return parse(raw).questions;
+}
+
+export function schemeLayout(raw: string): SchemeLayout {
+  return parse(raw).layout;
+}
+
+function parse(raw: string): { questions: SchemeQuestion[]; layout: SchemeLayout } {
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !NOISE.test(l));
 
   // The first all-capitals heading before the questions names the subject.
   const firstQ = lines.findIndex((l) => MAIN_START.test(l));
   const heading = lines.slice(0, Math.max(0, firstQ)).reverse().find((l) => /^[A-Z][A-Z\s&,-]{6,}$/.test(l) && !/COLLEGE|DEPARTMENT|ARMY|SECTION/.test(l));
   const topic = heading ? titleCase(heading) : null;
+  const choose = CHOOSE.exec(lines.slice(0, Math.max(0, firstQ)).join(' '));
 
   // A line starts a question part only if its marks appear within the next
   // few lines; otherwise "a. Cost." in an answer would look like a sub-question.
@@ -99,7 +157,7 @@ export function parseMarkingScheme(raw: string): SchemeQuestion[] {
     const sub = !main && SUB_START.exec(lines[i]);
     if (!main && !sub) return null;
     for (let j = i; j < Math.min(lines.length, i + 4); j++) {
-      if (j > i && (SOLUTION.test(lines[j]) || MAIN_START.test(lines[j]) || SUB_START.test(lines[j]))) break;
+      if (j > i && (SOLUTION.test(lines[j]) || SECTION.test(lines[j]) || MAIN_START.test(lines[j]) || SUB_START.test(lines[j]))) break;
       // "(1" at the end of one line and "mark)" on the next still count.
       if (QUESTION_MARKS.test(lines.slice(i, j + 1).join(' '))) return { main, sub, end: j };
     }
@@ -107,32 +165,135 @@ export function parseMarkingScheme(raw: string): SchemeQuestion[] {
   };
 
   const parts: Part[] = [];
+  const stems = new Map<number, string>(); // "16. Answer the following:" before its parts
+  const sectionTitles = new Map<string, string | null>();
+  let section: string | null = null;
+  const enterSection = (m: RegExpExecArray) => {
+    section = m[1].toUpperCase();
+    sectionTitles.set(section, m[2] ? titleCase(m[2]) : null);
+  };
+  // The first section heading sits just before the first question.
+  for (const l of lines.slice(0, Math.max(0, firstQ))) {
+    const m = SECTION.exec(l);
+    if (m) enterSection(m);
+  }
   let currentMain = 0;
   for (let i = firstQ < 0 ? lines.length : firstQ; i < lines.length; i++) {
+    const sec = SECTION.exec(lines[i]);
+    if (sec) {
+      enterSection(sec);
+      continue;
+    }
     const h = isHeader(i);
     if (h) {
-      let label: string;
+      let sub: string | null;
       let first: string;
       if (h.main) {
         currentMain = Number(h.main[1]);
-        label = `${currentMain}${h.main[2] ?? ''}`;
+        sub = h.main[2]?.toLowerCase() ?? null;
         first = h.main[3];
       } else {
-        label = `${currentMain}${(h.sub as RegExpExecArray)[1]}`;
+        sub = (h.sub as RegExpExecArray)[1].toLowerCase();
         first = (h.sub as RegExpExecArray)[2];
       }
-      parts.push({ label, header: [first, ...lines.slice(i + 1, h.end + 1)], answer: [] });
+      parts.push({ main: currentMain, sub, section, header: [first, ...lines.slice(i + 1, h.end + 1)], answer: [] });
       i = h.end;
+      continue;
+    }
+    // A question number with no marks of its own, followed by its lettered parts.
+    const stem = MAIN_START.exec(lines[i]);
+    if (stem && !stem[2] && Number(stem[1]) > currentMain && [1, 2, 3].some((k) => isHeader(i + k)?.sub)) {
+      currentMain = Number(stem[1]);
+      stems.set(currentMain, tidy(stem[3]));
       continue;
     }
     if (!parts.length || SOLUTION.test(lines[i])) continue;
     parts[parts.length - 1].answer.push(lines[i]);
   }
 
-  return parts.map((p) => toQuestion(p, topic));
+  // One question per number; its lettered parts are kept together under it.
+  const questions: SchemeQuestion[] = [];
+  for (const p of parts) {
+    const q = toQuestion(p, topic);
+    const prev = questions.at(-1);
+    if (p.sub && prev?.parts && prev.label === String(p.main)) prev.parts.push(toPart(p.sub, q));
+    else questions.push({ ...q, label: String(p.main), ...(p.sub ? { parts: [toPart(p.sub, q)] } : {}) });
+  }
+  for (const q of questions) if (q.parts) Object.assign(q, combineParts(q.parts, stems.get(Number(q.label)) ?? null));
+
+  const letters = [...new Set(questions.map((q) => q.section).filter((x): x is string => !!x))];
+  const numbers = questions.map((q) => Number(q.label));
+  const missingNumbers: number[] = [];
+  for (let n = 1; n < Math.max(0, ...numbers); n++) if (!numbers.includes(n)) missingNumbers.push(n);
+  const layout: SchemeLayout = {
+    sections: letters.map((letter) => {
+      const inSection = questions.filter((q) => q.section === letter);
+      return {
+        letter,
+        title: sectionTitles.get(letter) ?? null,
+        labels: inSection.map((q) => q.label),
+        marks: inSection.map((q) => q.totalMarks),
+        totalMarks: round(inSection.reduce((a, q) => a + q.totalMarks, 0)),
+      };
+    }),
+    choose: choose ? { count: words(choose[1]) ?? 0, section: choose[2].toUpperCase() } : null,
+    missingNumbers,
+    header: readHeader(raw, topic),
+  };
+  return { questions, layout };
+}
+
+/** The heading above the first question: who set the paper, the course, the time and the marks. */
+export function readHeader(raw: string, subject: string | null): PaperHeader {
+  const all = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const end = all.findIndex((l) => MAIN_START.test(l));
+  // A college name broken over two lines: "…COLLEGE OF LOGISTICS" / "AND MANAGEMENT".
+  const top = all.slice(0, end < 0 ? 40 : end).reduce<string[]>((out, l) => {
+    if (/^AND\s+[A-Z\s]+$/.test(l) && out.length && /\b(COLLEGE|SCHOOL|ACADEMY|INSTITUTE)\b/.test(out[out.length - 1])) out[out.length - 1] += ' ' + l;
+    else out.push(l);
+    return out;
+  }, []);
+  const text = top.join('\n');
+  const find = (re: RegExp) => tidy(re.exec(text)?.[1] ?? '') || null;
+  const titleLine = top.find((l) => /\b(test|exam(ination)?|quiz|assessment)\b/i.test(l) && !/^course\b/i.test(l));
+  return {
+    classification: top.find((l) => /^(RESTRICTED|CONFIDENTIAL|SECRET|UNCLASSIFIED)$/i.test(l))?.toUpperCase() ?? null,
+    institution: top.find((l) => /\b(COLLEGE|SCHOOL|ACADEMY|INSTITUTE|UNIVERSITY)\b/i.test(l) && !/DEPARTMENT/i.test(l)) ?? null,
+    department: top.find((l) => /\b(DEPARTMENT|WING|FACULTY|DIVISION)\b/i.test(l)) ?? null,
+    // "Test 1 (IE)Marking Scheme (Green) and 3 Questions" → "Test 1 (IE)";
+    // "Subject: LOGISTICS PLANNING TEST 1 IE Course: LMC 24/26" → "Logistics Planning Test 1 IE"
+    paperTitle: titleLine ? displayCase(tidy(titleLine.replace(/^Subject\s*:\s*/i, '').replace(/\s+Course\s*:.*$/i, '').split(/\s*marking\s+scheme|\s+and\s+\d+\s+questions/i)[0])) || null : null,
+    course: find(/Course\s*:\s*(.+?)(?:\s+Answer\b.*)?$/im),
+    time: find(/Time(?:\s+Allowed)?\s*:\s*(.+?)(?=\s+(?:Total|HPS|Date)\b|$)/im),
+    totalMarks: find(/(?:Total\s+Marks?|HPS)\s*:\s*([\d.]+\s*%?)/i),
+    totalLabel: /\bHPS\s*:/i.test(text) ? 'HPS' : /Total\s+Marks?\s*:/i.test(text) ? 'Total Marks' : null,
+    instruction: find(/Instructions?\s*:\s*(.+)$/im),
+    subject,
+  };
+}
+
+function toPart(label: string, q: SchemeQuestion): SchemePart {
+  return { label, body: q.body, totalMarks: q.totalMarks, modelAnswer: q.modelAnswer, markingNotes: q.markingNotes, points: q.points };
+}
+
+/** The whole question as the candidate sees it, with one scheme across all its parts. */
+export function combineParts(parts: SchemePart[], stem: string | null): Partial<SchemeQuestion> {
+  const tag = (l: string) => `(${l})`;
+  const notes = parts.filter((pt) => pt.markingNotes).map((pt) => `${tag(pt.label)} ${pt.markingNotes}`);
+  return {
+    type: 'THEORY',
+    options: undefined,
+    body: [...(stem ? [stem] : []), ...parts.map((pt) => `${tag(pt.label)} ${pt.body} (${pt.totalMarks} mark${pt.totalMarks === 1 ? '' : 's'})`)].join('\n'),
+    totalMarks: round(parts.reduce((a, pt) => a + pt.totalMarks, 0)),
+    modelAnswer: parts.map((pt) => `${tag(pt.label)} ${pt.modelAnswer ?? ''}`.trim()).join('\n\n'),
+    markingNotes: notes.length ? notes.join('; ') : null,
+    points: parts.flatMap((pt) => pt.points.map((point) => ({ ...point, canonicalTerm: `${tag(pt.label)} ${point.canonicalTerm}` }))),
+  };
 }
 
 function toQuestion(p: Part, topic: string | null): SchemeQuestion {
+  const label = `${p.main}${p.sub ?? ''}`;
+  const section = p.section;
   const headerText = tidy(p.header.join(' '));
   const totalMarks = Number(QUESTION_MARKS.exec(headerText)?.[1] ?? 0);
   const body = tidy(headerText.replace(/\(\s*\d+(?:\.\d+)?\s*marks?\b[^)]*\)*\)?\.?/i, ''));
@@ -140,7 +301,8 @@ function toQuestion(p: Part, topic: string | null): SchemeQuestion {
 
   if (TRUE_FALSE.test(body)) {
     return {
-      label: p.label,
+      label,
+      section,
       type: 'OBJECTIVE',
       body: tidy(body.replace(TRUE_FALSE, '')),
       totalMarks,
@@ -206,13 +368,24 @@ function toQuestion(p: Part, topic: string | null): SchemeQuestion {
       if (parts.length >= 2) names = parts.map((x) => capital(trimEnd(x)));
     }
   }
-  // Explanations follow the naming list in the same order; fall back to matching by name.
+  // Match each explanation to its point by name first, because the points aren't
+  // always explained in the order they were listed; otherwise by position.
+  // The first two words: "Increasing need…" must not match "Increasing organizational…".
+  const key = (s: string) => s.toLowerCase().replace(/^the\s+/, '').split(/\s+/).slice(0, 2).join(' ');
   const explanationFor = (name: string, index: number) =>
+    paragraphs.find((x) => x.explanation && key(x.name) === key(name))?.explanation ??
     (naming && paragraphs.length === names.length ? paragraphs[index]?.explanation : undefined) ??
-    paragraphs.find((x) => x.explanation && x.name.toLowerCase().startsWith(name.toLowerCase().slice(0, 10)))?.explanation ??
     '';
 
-  const modelAnswer = trimEnd(stripNotes(answerText)) || null;
+  // Kept line by line, with wrapped lines rejoined, so lists print as lists.
+  const answerLines: string[] = [];
+  for (const line of p.answer) {
+    const text = stripNotes(line);
+    if (!text) continue;
+    if (LIST_ITEM.test(line) || !answerLines.length) answerLines.push(text);
+    else answerLines[answerLines.length - 1] += ' ' + text;
+  }
+  const modelAnswer = trimEnd(answerLines.join('\n')) || null;
   const markingNotes = notes.length ? notes.join('; ') : null;
   let points: SchemePoint[] = [];
 
@@ -260,5 +433,5 @@ function toQuestion(p: Part, topic: string | null): SchemeQuestion {
     ];
   }
 
-  return { label: p.label, type: 'THEORY', body, totalMarks, topic, modelAnswer, markingNotes, points };
+  return { label, section, type: 'THEORY', body, totalMarks, topic, modelAnswer, markingNotes, points };
 }

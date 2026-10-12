@@ -148,6 +148,12 @@ export default function AnswerSheetsPage({ params }: { params: Promise<{ session
                 ) : (
                   <p className="question"><b>Continued</b>Continue your answer to question {q.number}.</p>
                 )}
+                {q.section ? (
+                  <p className="rules">
+                    <b>Section {q.section.letter}{q.section.title ? ` (${q.section.title})` : ''}.</b> {q.section.instructions}
+                    {q.section.choose ? ` Use these sheets only if you choose question ${q.number}; otherwise hand them in blank.` : ''}
+                  </p>
+                ) : null}
                 <p className="rules">Answer question {q.number} only, on the lines below, in black or blue ink. Write clearly; your answer is read from a scan.</p>
                 <div className="lines" aria-hidden="true">
                   {Array.from({ length: i === 0 ? LINES_FIRST_PAGE : LINES_LATER_PAGE }, (_, n) => <div key={n} />)}

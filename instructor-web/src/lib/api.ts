@@ -68,6 +68,7 @@ export interface Question {
   id: string; sessionId: string; topic: string; difficulty: string; type: 'OBJECTIVE' | 'THEORY';
   source: 'PAST_PAPER' | 'AI_DRAFTED'; status: QStatus; body: string; options: string[] | null; correctIndex: number | null;
   citation: string | null; citationExcerpt: string | null; rejectReason: string | null; version: number;
+  section?: string | null; sourceNumber?: number | null;
   createdAt: string; updatedAt: string; markingScheme: MarkingScheme | null;
 }
 export interface SourceDocument {
@@ -80,7 +81,32 @@ export interface Blueprint {
   id: string; sessionId: string; targetCount: number; objectiveCount: number; theoryCount: number; sourceMode: string;
   pastQuestionRatio: number; distribution: Record<string, number> | null; pastSessionIds: string[];
   difficultyTargets: { easy: number; medium: number; hard: number } | null; resultsRelease: 'instant' | 'hold'; createdAt: string;
+  format?: PaperFormat | null;
 }
+/** A past paper's layout a new exam can follow: a section answered in full, or one with a choice. */
+export type FormatSection =
+  | { letter: string; title: string | null; marks: number }
+  | { letter: string; title: string | null; count: number; choose: number; marksEach: number };
+export interface PaperFormat { sourceDocumentId: string; sourceTitle: string; sections: FormatSection[] }
+export interface PaperFormatOption {
+  documentId: string; title: string; sessionLabel: string; format: PaperFormat; total: number;
+  available: { letter: string; questions: number; marks: number; fitting: number | null }[];
+}
+export interface PrintItem {
+  number: number; section: string | null; type: 'OBJECTIVE' | 'THEORY'; body: string; options: string[] | null; correctIndex: number | null;
+  marks: number; modelAnswer: string | null; markingNotes: string | null;
+  points: { term: string; synonyms: string[]; marks: number; notes: string | null }[];
+}
+/** A published version laid out in its past paper's template, for printing. */
+export interface PrintPaper {
+  versionId: string; versionNumber: number; examDate: string; signature: string; total: number;
+  header: {
+    classification: string | null; institution: string | null; department: string | null; paperTitle: string | null;
+    course: string | null; time: string | null; totalMarks: string | null; totalLabel: string; subject: string | null; instruction: string | null;
+  };
+  sections: { letter: string | null; title: string | null; instructions: string | null; questions: number; choose?: number; marksEach?: number; items: PrintItem[] }[];
+}
+export interface PaperSection { letter: string; title: string | null; instructions: string; questions: number; choose?: number; marksEach?: number }
 export interface CoverageRow {
   topic: string; target: number; approved: number; pending: number; rejected: number;
   byDifficulty: { easy: number; medium: number; hard: number }; gap: number;
@@ -209,6 +235,7 @@ export interface ResultsSummary {
   objectiveCount: number;
   theoryCount: number;
   theoryMax: number;
+  sections: PaperSection[] | null;
   imported: number;
   unmatched: string[];
   rows: ResultsRow[];
@@ -217,6 +244,12 @@ export interface ResultsSummary {
 
 export interface ImportSummary { centre: string; imported: number; unchanged: number; conflicts: string[]; unmatched: string[]; notSubmitted: string[] }
 
+/** What the college server's AI is doing (GET /ai-queue). */
+export interface AiQueueStatus {
+  running: { id: string; stage: 'ocr' | 'mark'; model: string; startedAt: string } | null;
+  waiting: { ocr: number; mark: number };
+  etaSeconds: number;
+}
 export interface ScriptQueue {
   running: { id: string; stage: 'ocr' | 'mark'; model: string; startedAt: string } | null;
   waiting: { ocr: number; mark: number };
@@ -252,7 +285,7 @@ export interface AnswerSheetData {
   versionNumber: number;
   examDate: string;
   pagesPerQuestion: number;
-  questions: { id: string; number: number; topic: string; body: string; marks: number | null }[];
+  questions: { id: string; number: number; topic: string; body: string; marks: number | null; section: { letter: string; title: string | null; instructions: string; choose: number | null } | null }[];
   candidates: { id: string; armyNumber: string; rank: string; fullName: string; codes: Record<string, string[]> }[];
 }
 

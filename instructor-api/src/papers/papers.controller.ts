@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { PapersService } from './papers.service.js';
 import { PublishPaperDto } from './dto/publish-paper.dto.js';
 import { CurrentUser, Roles, actorName, type SessionUser } from '../auth/decorators.js';
@@ -14,6 +14,12 @@ export class PapersController {
   @Roles('EXAM_OFFICER', 'ADMIN')
   publish(@Body() dto: PublishPaperDto, @CurrentUser() user: SessionUser) {
     return this.papers.publish({ ...dto, publishedBy: actorName(user) });
+  }
+
+  /** A published version laid out for printing: the candidates' paper and the instructors' marking scheme. */
+  @Get(':versionId/print')
+  print(@Param('versionId') versionId: string) {
+    return this.papers.printData(versionId);
   }
 
   @Get()

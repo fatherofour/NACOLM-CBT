@@ -38,8 +38,11 @@ export class AiQueue {
   private streak = 0;
   private readonly avgSeconds: Record<Stage, number> = { ...DEFAULT_SECONDS };
 
+  // Aborts the running job's model call when it is cancelled.
+  private controller: AbortController | null = null;
+
   constructor(
-    private readonly run: (job: AiJob) => Promise<void>,
+    private readonly run: (job: AiJob, signal: AbortSignal) => Promise<void>,
     private readonly onModelSwitch: (previousModel: string) => Promise<void>,
     private readonly onError: (job: AiJob, err: unknown) => void,
     private readonly batchMax = 25,
@@ -56,6 +59,33 @@ export class AiQueue {
     for (const stage of ['ocr', 'mark'] as const) {
       this.lists[stage] = this.lists[stage].filter((j) => j.id !== id);
     }
+  }
+
+  /**
+   * Cancels a job: a waiting one is dropped, a running one has its model call
+   * aborted. Returns the waiting jobs dropped, and the running one if it was stopped.
+   */
+  cancel(id: string): { dropped: AiJob[]; stopped: AiJob | null } {
+    const dropped = [...this.lists.ocr, ...this.lists.mark].filter((j) => j.id === id);
+    this.remove(id);
+    const stopped = this.running?.id === id ? this.stopRunning() : null;
+    return { dropped, stopped };
+  }
+
+  /** Cancels everything: the waiting jobs are dropped and the running one is stopped. */
+  cancelAll(): { dropped: AiJob[]; stopped: AiJob | null } {
+    const dropped = [...this.lists.ocr, ...this.lists.mark];
+    this.lists.ocr = [];
+    this.lists.mark = [];
+    return { dropped, stopped: this.running ? this.stopRunning() : null };
+  }
+
+  private stopRunning(): AiJob | null {
+    const r = this.running;
+    this.controller?.abort(new Error('cancelled'));
+    if (!r) return null;
+    const { startedAt: _startedAt, ...job } = r;
+    return job;
   }
 
   size() {
@@ -120,14 +150,20 @@ export class AiQueue {
       this.lastModel = job.model;
       const startedAt = Date.now();
       this.running = { ...job, startedAt };
+      this.controller = new AbortController();
+      const { signal } = this.controller;
       try {
-        await this.run(job);
+        await this.run(job, signal);
       } catch (err) {
-        this.onError(job, err);
+        if (!signal.aborted) this.onError(job, err);
       } finally {
-        const took = (Date.now() - startedAt) / 1000;
-        this.avgSeconds[job.stage] = Math.round(this.avgSeconds[job.stage] * 0.7 + took * 0.3);
+        // A cancelled job says nothing about how long a real one takes.
+        if (!signal.aborted) {
+          const took = (Date.now() - startedAt) / 1000;
+          this.avgSeconds[job.stage] = Math.round(this.avgSeconds[job.stage] * 0.7 + took * 0.3);
+        }
         this.running = null;
+        this.controller = null;
       }
     }
   }

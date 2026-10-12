@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { SchemeSnapshot } from '../theory-scripts/marking.js';
 import { readEnvelope, verifyResults } from './results-file.js';
 import { itemAnalysis } from './item-analysis.js';
+import { layoutOf } from '../papers/papers.service.js';
 
 @Injectable()
 export class ResultsService {
@@ -69,7 +70,17 @@ export class ResultsService {
 
     const theoryItems = version.items.filter((i) => i.question.type === 'THEORY');
     const objectiveCount = version.items.length - theoryItems.length;
-    const theoryMax = theoryItems.reduce((sum, i) => sum + ((i.markingSnapshot as unknown as SchemeSnapshot | null)?.totalMarks ?? i.question.markingScheme?.totalMarks ?? 0), 0);
+    const maxOf = (i: (typeof theoryItems)[number]) => (i.markingSnapshot as unknown as SchemeSnapshot | null)?.totalMarks ?? i.question.markingScheme?.totalMarks ?? 0;
+    // "Answer 3 of the 4 in Section B": only a candidate's best answers in that section count.
+    const choices = (layoutOf(version.layout)?.sections ?? []).filter((sec) => sec.choose).map((sec) => {
+      const items = theoryItems.filter((i) => i.section === sec.letter);
+      const choose = Math.min(sec.choose!, items.length);
+      return { ...sec, choose, ids: new Set(items.map((i) => i.questionId)), max: items.map(maxOf).sort((a, b) => b - a).slice(0, choose).reduce((a, b) => a + b, 0) };
+    });
+    const inChoice = (questionId: string) => choices.some((c) => c.ids.has(questionId));
+    const compulsory = theoryItems.filter((i) => !inChoice(i.questionId));
+    const theoryMax = compulsory.reduce((sum, i) => sum + maxOf(i), 0) + choices.reduce((sum, c) => sum + c.max, 0);
+    const theoryExpected = compulsory.length + choices.reduce((sum, c) => sum + c.choose, 0);
 
     const [candidates, venue, scripts] = await Promise.all([
       this.prisma.candidate.findMany({ where: { sessionId: version.paper.sessionId }, orderBy: { armyNumber: 'asc' } }),
@@ -83,18 +94,25 @@ export class ResultsService {
         const v = venue.find((x) => x.candidateId === c.id);
         const mine = scripts.filter((s) => s.candidateId === c.id);
         const marked = mine.filter((s) => s.status === 'REVIEWED' || s.status === 'PUBLISHED');
-        const theoryScore = marked.reduce((sum, s) => sum + (s.instructorScore ?? 0), 0);
+        const score = (s: (typeof marked)[number]) => s.instructorScore ?? 0;
+        const compulsoryMarked = marked.filter((s) => !inChoice(s.questionId));
+        const best = choices.map((c) => marked.filter((s) => c.ids.has(s.questionId)).map(score).sort((a, b) => b - a));
+        const theoryScore =
+          compulsoryMarked.reduce((sum, s) => sum + score(s), 0) + best.reduce((sum, scores, k) => sum + scores.slice(0, choices[k].choose).reduce((a, b) => a + b, 0), 0);
         const objectiveTotal = v?.objectiveTotal ?? objectiveCount;
         const max = objectiveTotal + theoryMax;
         const total = (v?.objectiveCorrect ?? 0) + theoryScore;
-        const complete = !!v && marked.length === theoryItems.length;
+        // Complete once every compulsory answer is marked, enough answers in each
+        // choice section are marked, and nothing uploaded is still waiting.
+        const complete =
+          !!v && compulsoryMarked.length === compulsory.length && best.every((scores, k) => scores.length >= choices[k].choose) && marked.length === mine.length;
         return {
           candidateId: c.id,
           armyNumber: c.armyNumber,
           rank: c.rank,
           fullName: c.fullName,
           objective: v ? { correct: v.objectiveCorrect, total: v.objectiveTotal, submittedAt: v.submittedAt, reference: v.reference, centre: v.centre } : null,
-          theory: { score: theoryScore, max: theoryMax, marked: marked.length, expected: theoryItems.length, published: mine.filter((s) => s.status === 'PUBLISHED').length },
+          theory: { score: theoryScore, max: theoryMax, marked: marked.length, expected: theoryExpected, published: mine.filter((s) => s.status === 'PUBLISHED').length },
           total,
           max,
           percent: max ? Math.round((total / max) * 1000) / 10 : null,
@@ -118,6 +136,7 @@ export class ResultsService {
       objectiveCount,
       theoryCount: theoryItems.length,
       theoryMax,
+      sections: layoutOf(version.layout)?.sections ?? null,
       imported: venue.length,
       unmatched: venue.filter((v) => !v.candidateId).map((v) => v.serviceNumber),
       rows,

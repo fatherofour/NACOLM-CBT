@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Alert, Button } from './basics';
 import { Glyph } from './glyph';
 
@@ -9,6 +9,7 @@ export function PublishConfirm({
   nextVersion,
   summary,
   blockedReason,
+  blockedAction,
   busy,
   theoryCount = 0,
   onPublish,
@@ -18,6 +19,8 @@ export function PublishConfirm({
   nextVersion: number;
   summary: [string, string][];
   blockedReason?: string;
+  // What to do about it, e.g. a link to the schemes still to approve.
+  blockedAction?: ReactNode;
   busy?: boolean;
   theoryCount?: number;
   onPublish: (examDate: string, theoryOnPaper: boolean) => void;
@@ -41,6 +44,7 @@ export function PublishConfirm({
       {blockedReason ? (
         <Alert tone="caution" title="Can’t publish yet">
           {blockedReason}
+          {blockedAction ? <div className="mt-3">{blockedAction}</div> : null}
         </Alert>
       ) : (
         <>

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Glyph, type GlyphName } from '@/components/nc/glyph';
 import { ThemeToggle } from './theme-toggle';
+import { AiStatus } from './ai-status';
 import { UserProvider } from './user-context';
 import { displayName, type User } from '@/lib/api';
 
@@ -57,6 +58,7 @@ export function Shell({ user, children }: { user: User; children: React.ReactNod
             </span>
           </Link>
           <span className="flex-1" />
+          <AiStatus />
           <span className="rounded-sm border border-on-command-muted px-2 py-[3px] text-xs font-[650]">{roleLabel}</span>
           <ThemeToggle />
           <span className="hidden items-center gap-2.5 md:flex">

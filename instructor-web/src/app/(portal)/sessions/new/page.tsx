@@ -6,7 +6,7 @@ import { Alert, Button, EmptyState, RadioCards, Spinner, SumCheck, TagInput, Wiz
 import { Glyph } from '@/components/nc/glyph';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { useUser } from '@/components/shell/user-context';
-import { api, qs, type Blueprint, type Course, type Question, type Session, type SourceDocument } from '@/lib/api';
+import { api, qs, type Blueprint, type Course, type FormatSection, type PaperFormatOption, type Question, type Session, type SourceDocument } from '@/lib/api';
 import { useData } from '@/lib/use-data';
 
 type Source = 'past_only' | 'study_material_only' | 'both';
@@ -14,7 +14,18 @@ const STEPS = ['Source', 'Count and difficulty', 'Results', 'Generate'];
 const NEW = '__new__';
 
 interface YearInfo { session: Session; count: number; topics: string[] }
-interface GenResult { created: number; skippedDuplicates: number; shortfalls: { topic: string; type: string; needed: number; found: number }[] }
+interface GenResult {
+  created: number;
+  skippedDuplicates: number;
+  shortfalls: { topic: string; type: string; needed: number; found: number }[];
+  // When following a past paper's layout: what each section asked for and got.
+  sections?: { letter: string; title: string | null; wanted: string; got: string; short: boolean }[];
+}
+
+const sectionName = (s: { letter: string; title: string | null }) => (s.letter ? `Section ${s.letter}${s.title ? ` (${s.title})` : ''}` : 'Whole paper');
+const isChoice = (s: FormatSection): s is Extract<FormatSection, { choose: number }> => 'choose' in s;
+const describeSection = (s: FormatSection) =>
+  isChoice(s) ? `${s.count} questions of ${s.marksEach} marks; candidates answer ${s.choose}` : `questions adding up to ${s.marks} marks; candidates answer all`;
 
 export default function NewSessionPage() {
   return (
@@ -41,6 +52,9 @@ function Wizard() {
   const [diff, setDiff] = useState({ easy: 12, medium: 20, hard: 8 });
   const [topics, setTopics] = useState<string[]>([]);
   const [release, setRelease] = useState<'instant' | 'hold'>('hold');
+  // "Past questions only" can follow an uploaded past paper's layout instead of a free mix.
+  const [layoutMode, setLayoutMode] = useState<'paper' | 'mix' | null>(null);
+  const [pickedFormat, setFormat] = useState('');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<GenResult | null>(null);
   const [runError, setRunError] = useState('');
@@ -83,6 +97,27 @@ function Wizard() {
     [sessionId],
   );
 
+  const { data: formats, loading: formatsLoading } = useData<PaperFormatOption[]>(
+    () => (source === 'past_only' && years.length ? api.get(`/blueprints/formats${qs({ sessionIds: years.join(',') })}`) : Promise.resolve([])),
+    [source, years.join(',')],
+  );
+  const usesFormat = source === 'past_only' && (layoutMode ?? (formats?.length ? 'paper' : 'mix')) === 'paper' && !!formats?.length;
+  const formatOption = usesFormat ? (formats?.find((f) => f.documentId === pickedFormat) ?? formats?.[0]) : undefined;
+  // What the approved bank can't cover for each section of the chosen layout.
+  const formatGaps = (formatOption?.format.sections ?? []).flatMap((s) => {
+    const a = formatOption!.available.find((x) => x.letter === s.letter);
+    if (isChoice(s)) return (a?.fitting ?? 0) < s.count ? [`${sectionName(s)} needs ${s.count} approved questions of ${s.marksEach} marks; the bank has ${a?.fitting ?? 0}.`] : [];
+    return (a?.marks ?? 0) < s.marks ? [`${sectionName(s)} needs ${s.marks} marks of approved questions; the bank has ${a?.marks ?? 0}.`] : [];
+  });
+  // With exactly one paper's worth in the bank, the new paper repeats it.
+  const sameAsPast =
+    !!formatOption &&
+    !formatGaps.length &&
+    formatOption.format.sections.every((s) => {
+      const a = formatOption.available.find((x) => x.letter === s.letter);
+      return isChoice(s) ? a?.fitting === s.count : Math.abs((a?.marks ?? 0) - s.marks) < 0.001;
+    });
+
   const split = pickedSplit ?? { bank: Math.round(total * 0.6), ai: total - Math.round(total * 0.6) };
 
   const bankNeed = source === 'past_only' ? total : source === 'both' ? split.bank : 0;
@@ -96,7 +131,10 @@ function Wizard() {
       if (needsMaterial && isNewTerm) return 'Upload study material for the new term first';
       if (source === 'both' && split.bank + split.ai !== total) return `Bank + AI must equal ${total}`;
     }
-    if (step === 1) {
+    if (step === 1 && usesFormat) {
+      if (formatGaps.length) return 'Approve more past questions for this layout, or pick more years';
+    }
+    if (step === 1 && !usesFormat) {
       if (total < 1) return 'Enter how many questions';
       if (mix.objective + mix.theory !== total) return 'Objective + theory must equal the total';
       if (diff.easy + diff.medium + diff.hard !== total) return 'Easy + moderate + hard must equal the total';
@@ -117,7 +155,13 @@ function Wizard() {
         sid = s.id;
       }
       setCreatedSessionId(sid);
-      const bp = await api.post<Blueprint>('/blueprints', {
+      const bp = await api.post<Blueprint>('/blueprints', usesFormat && formatOption ? {
+        sessionId: sid,
+        sourceMode: 'past_only',
+        pastSessionIds: years,
+        resultsRelease: release,
+        formatDocumentId: formatOption.documentId,
+      } : {
         sessionId: sid,
         sourceMode: source,
         pastQuestionRatio: source === 'both' ? split.bank / total : source === 'past_only' ? 1 : 0,
@@ -219,6 +263,37 @@ function Wizard() {
                 </fieldset>
               ) : null}
 
+              {source === 'past_only' && years.length ? (
+                <fieldset className="m-0 flex flex-col gap-3 rounded-md border border-line p-4">
+                  <legend className="t-heading px-1.5">Paper layout</legend>
+                  {formatsLoading ? <Spinner label="Looking for past paper layouts…" /> : null}
+                  {!formatsLoading && !formats?.length ? (
+                    <p className="m-0 text-ink-muted">None of the selected years has a past paper with a known layout. Upload its marking scheme in Library &gt; Past papers to follow its sections and marks; until then questions are drawn by count and topic.</p>
+                  ) : null}
+                  {formats?.length ? (
+                    <>
+                      <RadioCards
+                        label="How should the paper be laid out?"
+                        value={usesFormat ? 'paper' : 'mix'}
+                        onChange={(v) => setLayoutMode(v as 'paper' | 'mix')}
+                        options={[
+                          { value: 'paper', title: 'Follow a past paper', description: 'Same sections, marks and choices as a paper you uploaded. Questions are drawn whole.' },
+                          { value: 'mix', title: 'Free mix', description: 'Choose how many objective and theory questions, by topic and difficulty.' },
+                        ]}
+                      />
+                      {usesFormat ? (
+                        <label className="label">
+                          Past paper to follow
+                          <select value={formatOption?.documentId ?? ''} onChange={(e) => setFormat(e.target.value)}>
+                            {formats.map((f) => <option key={f.documentId} value={f.documentId}>{f.title} ({f.sessionLabel}), {f.total} marks</option>)}
+                          </select>
+                        </label>
+                      ) : null}
+                    </>
+                  ) : null}
+                </fieldset>
+              ) : null}
+
               {needsMaterial ? (
                 isNewTerm || (materials && !materials.length) ? (
                   <Alert tone="caution" title="Upload study material to continue">
@@ -246,7 +321,47 @@ function Wizard() {
             </>
           ) : null}
 
-          {step === 1 ? (
+          {step === 1 && usesFormat && formatOption ? (
+            <>
+              <h2 className="t-title m-0">The paper’s layout</h2>
+              <p className="-mt-2 m-0 text-ink-muted">
+                Following <b>{formatOption.title}</b> ({formatOption.sessionLabel}). Each section is filled with whole past questions to the same marks, drawn at random from the years you picked.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm [&_td]:border-t [&_td]:border-line [&_td]:px-2 [&_td]:py-2 [&_th]:px-2 [&_th]:py-2 [&_th]:text-left">
+                  <thead>
+                    <tr><th>Section</th><th>What goes in it</th><th className="!text-right">Counts towards total</th><th>In the approved bank</th></tr>
+                  </thead>
+                  <tbody>
+                    {formatOption.format.sections.map((s) => {
+                      const a = formatOption.available.find((x) => x.letter === s.letter);
+                      return (
+                        <tr key={s.letter}>
+                          <td className="font-semibold">{sectionName(s)}</td>
+                          <td>{describeSection(s)}</td>
+                          <td className="text-right tabular-nums">{isChoice(s) ? s.choose * s.marksEach : s.marks}</td>
+                          <td className="tabular-nums">{isChoice(s) ? `${a?.fitting ?? 0} questions of ${s.marksEach} marks` : `${a?.questions ?? 0} questions, ${a?.marks ?? 0} marks`}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr><td colSpan={2} className="font-semibold">Total</td><td className="text-right font-semibold tabular-nums">{formatOption.total}</td><td /></tr>
+                  </tbody>
+                </table>
+              </div>
+              {formatGaps.length ? (
+                <Alert tone="caution" title="The bank can’t fill this layout yet">
+                  <ul className="m-0 pl-4">{formatGaps.map((g) => <li key={g}>{g}</li>)}</ul>
+                  Only approved past questions are drawn. Approve them on the past paper term’s Review page, or pick more years.
+                </Alert>
+              ) : sameAsPast ? (
+                <Alert tone="info" title="The bank holds exactly one paper’s worth">
+                  So the new paper will have the same questions as the past paper. Upload more past papers in this layout, or pick more years, to get a different mix each time.
+                </Alert>
+              ) : null}
+            </>
+          ) : null}
+
+          {step === 1 && !usesFormat ? (
             <>
               <h2 className="t-title m-0">How many questions, and how hard?</h2>
               <div className="grid grid-cols-3 gap-3 md:flex">
@@ -313,11 +428,22 @@ function Wizard() {
                 <div><dt>Source</dt><dd>{{ past_only: 'Past questions only', study_material_only: 'Study material only', both: 'Both' }[source]}</dd></div>
                 <div><dt>Past-paper years</dt><dd>{usesBank ? bankYears.filter((y) => years.includes(y.session.id)).map((y) => y.session.label).join(', ') || 'This term only' : 'Not used'}</dd></div>
                 <div><dt>Split</dt><dd>{source === 'both' ? `${split.bank} bank / ${split.ai} AI` : source === 'past_only' ? 'All from bank' : 'All AI-drafted'}</dd></div>
-                <div><dt>Total</dt><dd>{total} questions</dd></div>
-                <div><dt>Objective / theory</dt><dd>{mix.objective} / {mix.theory}</dd></div>
-                <div><dt>Easy / moderate / hard</dt><dd>{diff.easy} / {diff.medium} / {diff.hard}</dd></div>
-                <div><dt>Results</dt><dd>{release === 'hold' ? 'Sent to instructor first' : 'Published on submission'}</dd></div>
-                <div className="col-span-2 md:col-span-4"><dt>Topics</dt><dd>{topics.join(', ')}</dd></div>
+                {usesFormat && formatOption ? (
+                  <>
+                    <div><dt>Layout</dt><dd>{formatOption.title}</dd></div>
+                    <div><dt>Total</dt><dd>{formatOption.total} marks</dd></div>
+                    <div><dt>Results</dt><dd>{release === 'hold' ? 'Sent to instructor first' : 'Published on submission'}</dd></div>
+                    <div className="col-span-2 md:col-span-4"><dt>Sections</dt><dd>{formatOption.format.sections.map((s) => `${sectionName(s)}: ${describeSection(s)}`).join('. ')}.</dd></div>
+                  </>
+                ) : (
+                  <>
+                    <div><dt>Total</dt><dd>{total} questions</dd></div>
+                    <div><dt>Objective / theory</dt><dd>{mix.objective} / {mix.theory}</dd></div>
+                    <div><dt>Easy / moderate / hard</dt><dd>{diff.easy} / {diff.medium} / {diff.hard}</dd></div>
+                    <div><dt>Results</dt><dd>{release === 'hold' ? 'Sent to instructor first' : 'Published on submission'}</dd></div>
+                    <div className="col-span-2 md:col-span-4"><dt>Topics</dt><dd>{topics.join(', ')}</dd></div>
+                  </>
+                )}
               </dl>
               {running ? (
                 <div className="flex flex-col gap-2">
@@ -341,6 +467,16 @@ function Wizard() {
                     </div>
                     <Link className="btnlink primary" href={`/sessions/${createdSessionId}/review`}>Start review</Link>
                   </div>
+                  {result.sections?.length ? (
+                    <Alert tone={result.sections.some((s) => s.short) ? 'caution' : 'info'} title={result.sections.some((s) => s.short) ? 'Some sections came up short' : 'Every section filled'}>
+                      <ul className="m-0 pl-4">
+                        {result.sections.map((s) => (
+                          <li key={s.letter}>{sectionName(s)}: wanted {s.wanted}, got {s.got}</li>
+                        ))}
+                      </ul>
+                      {result.sections.some((s) => s.short) ? 'Approve more past questions in those sections, or pick more years, then generate again.' : null}
+                    </Alert>
+                  ) : null}
                   {result.shortfalls.length ? (
                     <Alert tone="caution" title="Some topics came up short">
                       <ul className="m-0 pl-4">

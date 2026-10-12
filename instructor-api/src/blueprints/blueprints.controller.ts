@@ -12,6 +12,12 @@ export class BlueprintsController {
     return this.blueprints.listForSession(sessionId);
   }
 
+  /** Past papers in these terms whose layout a new exam can follow, with what the bank holds for each section. */
+  @Get('formats')
+  formats(@Query('sessionIds') sessionIds = '') {
+    return this.blueprints.formats(sessionIds.split(',').filter(Boolean));
+  }
+
   @Post()
   create(@Body() dto: CreateBlueprintDto) {
     return this.blueprints.create(dto);

@@ -6,6 +6,7 @@ import { Glyph } from '@/components/nc/glyph';
 import { PageHead, Panel } from '@/components/shell/page-head';
 import { useUser } from '@/components/shell/user-context';
 import { api, qs, type Course, type Question, type Session, type SourceDocument } from '@/lib/api';
+import { CancelAiButton } from '@/components/shell/ai-status';
 import { useData } from '@/lib/use-data';
 
 type Kind = 'PAST_PAPER' | 'STUDY_MATERIAL';
@@ -218,7 +219,13 @@ export function LibraryPage({ kind }: { kind: Kind }) {
 
 function DocStatus({ d }: { d: SourceDocument }) {
   if (d.docType === 'PAST_PAPER') {
-    if (d.extraction === 'reading') return <Chip tone="bank">AI is reading the handwriting…</Chip>;
+    if (d.extraction === 'reading')
+      return (
+        <span className="inline-flex flex-wrap items-center gap-1">
+          <Chip tone="bank">AI is reading the handwriting…</Chip>
+          <CancelAiButton jobId={`paper:${d.id}`} />
+        </span>
+      );
     if (d.extraction === 'failed') return <span title={d.extractionNote ?? undefined}><Chip tone="rejected">Couldn’t read</Chip></span>;
     if (d.extraction === 'done') return <span title={d.extractionNote ?? undefined}><Chip tone="approved">{d.extractedCount ?? 0} question{d.extractedCount === 1 ? '' : 's'} drafted</Chip></span>;
     return <Chip tone="approved">Stored</Chip>;

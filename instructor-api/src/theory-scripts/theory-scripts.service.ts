@@ -4,6 +4,7 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { layoutOf } from '../papers/papers.service.js';
 import { OllamaService } from '../ollama/ollama.service.js';
 import type { MarkEventKind, ScriptAnswerStatus } from '../generated/prisma/enums.js';
 import type { AiJob } from '../ai-queue/ai-queue.js';
@@ -54,8 +55,13 @@ export class TheoryScriptsService implements OnModuleInit {
     private readonly ollama: OllamaService,
     private readonly queue: AiQueueService,
   ) {
-    this.queue.register('ocr', (id) => this.runOcr(id));
-    this.queue.register('mark', (id, model) => this.runMarking(id, model));
+    // Cancelled: the script waits with a note, and "Read again" / "Mark again" restarts it.
+    this.queue.register('ocr', (id) => this.runOcr(id), (id, by) =>
+      this.prisma.theoryScriptAnswer.update({ where: { id }, data: { status: 'OCR_FAILED' as ScriptAnswerStatus, ocrError: `Cancelled by ${by} before the AI read it.` } }),
+    );
+    this.queue.register('mark', (id, model) => this.runMarking(id, model), (id, by) =>
+      this.prisma.theoryScriptAnswer.update({ where: { id }, data: { status: 'AI_MARKING_FAILED' as ScriptAnswerStatus, aiError: `Cancelled by ${by} before the AI marked it.` } }),
+    );
   }
 
   /** The queue lives in memory, so a restart would strand scripts mid-pipeline; pick them back up. */
@@ -306,12 +312,17 @@ export class TheoryScriptsService implements OnModuleInit {
     });
     const schemes = await this.prisma.markingScheme.findMany({ where: { questionId: { in: theory.map((t) => t.questionId) } } });
     const marks = new Map(schemes.map((s) => [s.questionId, s.totalMarks]));
+    const sections = new Map((layoutOf(version.layout)?.sections ?? []).map((s) => [s.letter, s]));
+    const sectionOf = (letter: string | null) => {
+      const s = letter ? sections.get(letter) : undefined;
+      return s ? { letter: s.letter, title: s.title, instructions: s.instructions, choose: s.choose ?? null } : null;
+    };
     return {
       paperTitle: version.paper.title,
       versionNumber: version.versionNumber,
       examDate: version.examDate,
       pagesPerQuestion: pages,
-      questions: theory.map((t) => ({ id: t.questionId, number: t.position + 1, topic: t.question.topic, body: t.question.body, marks: marks.get(t.questionId) ?? null })),
+      questions: theory.map((t) => ({ id: t.questionId, number: t.position + 1, topic: t.question.topic, body: t.question.body, marks: marks.get(t.questionId) ?? null, section: sectionOf(t.section) })),
       candidates: candidates.map((c) => ({
         id: c.id,
         armyNumber: c.armyNumber,

@@ -88,3 +88,57 @@ describe('AiQueue', () => {
     expect(s.etaSeconds).toBeGreaterThan(0);
   });
 });
+
+describe('AiQueue cancelling', () => {
+  // A job that runs until its signal is aborted, like a model call.
+  function blocking() {
+    const ran: string[] = [];
+    const errors: string[] = [];
+    const queue = new AiQueue(
+      (job, signal) =>
+        new Promise<void>((resolve, reject) => {
+          ran.push(job.id);
+          signal.addEventListener('abort', () => reject(signal.reason as Error));
+        }),
+      async () => undefined,
+      (job) => errors.push(job.id),
+    );
+    return { queue, ran, errors };
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  it('drops a waiting job without running it', async () => {
+    const { queue, ran } = blocking();
+    queue.add(ocr('a'));
+    queue.add(ocr('b'));
+    await tick();
+    expect(queue.cancel('b').dropped.map((j) => j.id)).toEqual(['b']);
+    expect(queue.status().waiting.ocr).toBe(0);
+    expect(ran).toEqual(['a']);
+  });
+
+  it('aborts the running job and moves on, without reporting it as a crash', async () => {
+    const { queue, ran, errors } = blocking();
+    queue.add(ocr('a'));
+    queue.add(ocr('b'));
+    await tick();
+    expect(queue.cancel('a').stopped?.id).toBe('a');
+    await tick();
+    expect(ran).toEqual(['a', 'b']);
+    expect(errors).toEqual([]);
+  });
+
+  it('stops everything at once', async () => {
+    const { queue, ran } = blocking();
+    queue.add(ocr('a'));
+    queue.add(mark('b'));
+    queue.add(mark('c'));
+    await tick();
+    const { dropped, stopped } = queue.cancelAll();
+    expect(stopped?.id).toBe('a');
+    expect(dropped.map((j) => j.id)).toEqual(['b', 'c']);
+    await tick();
+    expect(ran).toEqual(['a']);
+    expect(queue.size()).toBe(0);
+  });
+});

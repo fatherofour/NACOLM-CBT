@@ -10,7 +10,7 @@ import { AiGenerationService } from '../ai-generation/ai-generation.service.js';
 import type { DocumentType } from '../generated/prisma/enums.js';
 import { extractText, hasUsableText, pageImages } from './extract-text.js';
 import { parsePastPaperText } from './past-paper-parser.js';
-import { looksLikeMarkingScheme, parseMarkingScheme } from './marking-scheme-parser.js';
+import { readScheme } from './scheme-reader.js';
 import { OllamaService } from '../ollama/ollama.service.js';
 import { AiQueueService } from '../ai-queue/ai-queue.service.js';
 import { KEEP_ALIVE, OCR_MODEL } from '../ai-queue/models.js';
@@ -23,6 +23,38 @@ const PAPER_OCR_PROMPT = `This is one page of an exam question paper or marking 
 
 const STORAGE_ROOT = process.env.DOCUMENT_STORAGE_ROOT ?? './data/documents';
 
+/**
+ * A marking scheme's layout in one line, so the instructor can check the import
+ * against the paper: "Section A (Objective): 12 questions, 25 marks. Section B
+ * (Theory): questions 15–18, answer 3 of 4 (25 marks each). Total 100 marks.
+ * Question numbers 9, 10 are not in the document."
+ */
+function layoutNote(text: string): string | null {
+  const scheme = readScheme(text);
+  if (!scheme) return null;
+  const { sections, choose, missingNumbers, header } = scheme.layout;
+  let total = 0;
+  const lines = sections.map((s) => {
+    const name = s.letter ? `Section ${s.letter}${s.title ? ` (${s.title})` : ''}` : 'The paper';
+    const count = s.labels.length;
+    if (choose?.section === s.letter && choose.count < count) {
+      // The paper's total only adds up when every choice carries the same marks.
+      const even = s.marks.every((m) => m === s.marks[0]);
+      total += even ? s.marks[0] * choose.count : NaN;
+      return `${name}: questions ${s.labels[0]}–${s.labels.at(-1)}, answer ${choose.count} of ${count}${even ? ` (${s.marks[0]} marks each)` : ''}.`;
+    }
+    total += s.totalMarks;
+    return `${name}: ${count} question${count === 1 ? '' : 's'}, ${s.totalMarks} marks.`;
+  });
+  if (Number.isFinite(total) && sections.length > 1) lines.push(`Total ${total} marks.`);
+  // "HPS: 108" on the paper against what the questions add up to.
+  const stated = header?.totalMarks && !header.totalMarks.includes('%') ? Number(header.totalMarks) : null;
+  if (stated && Number.isFinite(total) && Math.abs(stated - total) > 0.001) lines.push(`The paper says ${header!.totalLabel ?? 'total'} ${stated}, but the questions add up to ${total}: check the marks.`);
+  else if (stated && Number.isFinite(total)) lines.push(`Matches the paper’s ${header!.totalLabel ?? 'total'} of ${stated}.`);
+  if (missingNumbers.length) lines.push(`Question number${missingNumbers.length === 1 ? '' : 's'} ${missingNumbers.join(', ')} ${missingNumbers.length === 1 ? 'is' : 'are'} not in the document.`);
+  return lines.join(' ') || null;
+}
+
 @Injectable()
 export class DocumentsService implements OnModuleInit {
   private readonly logger = new Logger(DocumentsService.name);
@@ -33,7 +65,12 @@ export class DocumentsService implements OnModuleInit {
     private readonly ollama: OllamaService,
     private readonly queue: AiQueueService,
   ) {
-    this.queue.register('paper-ocr', (id, model) => this.readPaper(id, model));
+    this.queue.register('paper-ocr', (id, model) => this.readPaper(id, model), (id, by) =>
+      this.prisma.sourceDocument.update({
+        where: { id },
+        data: { extraction: 'failed', extractionNote: `Cancelled by ${by} before the AI finished reading it. Delete it and upload it again to try again.` },
+      }),
+    );
   }
 
   /** Papers the AI was still reading when the server restarted go back in the queue. */
@@ -125,7 +162,7 @@ export class DocumentsService implements OnModuleInit {
       return { created: 0, reading: true };
     }
     const created = await this.createQuestions(doc, text);
-    await this.prisma.sourceDocument.update({ where: { id: documentId }, data: { extraction: 'done', extractedCount: created, extractionNote: null } });
+    await this.prisma.sourceDocument.update({ where: { id: documentId }, data: { extraction: 'done', extractedCount: created, extractionNote: layoutNote(text) } });
     return { created, reading: false };
   }
 
@@ -149,7 +186,9 @@ export class DocumentsService implements OnModuleInit {
           extraction: 'done',
           extractedCount: created,
           transcript,
-          extractionNote: created ? `Read by the AI from ${pages.length} page${pages.length === 1 ? '' : 's'}. Check each question against the paper.` : 'The AI read the paper but no questions could be picked out. Check the transcript.',
+          extractionNote: created
+            ? [`Read by the AI from ${pages.length} page${pages.length === 1 ? '' : 's'}. Check each question against the paper.`, layoutNote(transcript)].filter(Boolean).join(' ')
+            : 'The AI read the paper but no questions could be picked out. Check the transcript.',
         },
       });
     } catch (err) {
@@ -159,9 +198,12 @@ export class DocumentsService implements OnModuleInit {
   }
 
   private async createQuestions(doc: { id: string; sessionId: string; title: string }, text: string, readByAi = false) {
-    const citation = (label: string | number) => `${doc.title}, question ${label}${readByAi ? ' (read by AI from handwriting/scan)' : ''}`;
-    if (looksLikeMarkingScheme(text)) {
-      const parsed = parseMarkingScheme(text);
+    const citation = (label: string | number, section?: string | null) =>
+      `${doc.title}, ${section ? `Section ${section}, ` : ''}question ${label}${readByAi ? ' (read by AI from handwriting/scan)' : ''}`;
+    const scheme = readScheme(text);
+    if (scheme) {
+      // One bank question per numbered question; parts (a, b, c…) stay inside it.
+      const parsed = scheme.questions;
       for (const q of parsed) {
         await this.prisma.questionBankItem.create({
           data: {
@@ -172,7 +214,9 @@ export class DocumentsService implements OnModuleInit {
             status: 'DRAFT',
             body: q.body,
             options: q.options,
-            citation: citation(q.label),
+            citation: citation(q.label, q.section),
+            section: q.section,
+            sourceNumber: Number(q.label) || null,
             markingScheme:
               q.type === 'THEORY' && q.totalMarks > 0
                 ? {
@@ -188,6 +232,9 @@ export class DocumentsService implements OnModuleInit {
           },
         });
       }
+      // Kept so a new exam can follow this paper's layout.
+      const layout = scheme.layout;
+      await this.prisma.sourceDocument.update({ where: { id: doc.id }, data: { layout: layout.sections.length ? (layout as never) : undefined } });
       return parsed.length;
     }
 

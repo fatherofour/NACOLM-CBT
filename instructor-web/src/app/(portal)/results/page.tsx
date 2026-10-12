@@ -75,6 +75,9 @@ export default function ResultsPage() {
                 <span><b>{r.theoryCount}</b> theory, {r.theoryMax} marks{r.theoryOnPaper ? ', on paper' : ''}</span>
                 <span>Pass mark <b>{r.passMark}%</b></span>
                 <span><b>{r.imported}</b> candidate result{r.imported === 1 ? '' : 's'} imported from the exam centre</span>
+                {r.sections?.filter((s) => s.choose).map((s) => (
+                  <span key={s.letter}>Section {s.letter}: candidates answer {s.choose} of {s.questions}; their best {s.choose} count</span>
+                ))}
               </Panel>
               {r.unmatched.length ? (
                 <Alert tone="caution" title={`${r.unmatched.length} result${r.unmatched.length === 1 ? '' : 's'} didn’t match a candidate in this session`}>{r.unmatched.join(', ')}. Check the roster used at the venue.</Alert>

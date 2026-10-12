@@ -5,6 +5,10 @@ import { CreateBlueprintDto } from './dto/create-blueprint.dto.js';
 import { allocateByWeight, allocateEvenly } from './allocation.js';
 import { isNearDuplicate } from './duplicate-detection.js';
 import { shuffle } from './shuffle.js';
+import { formatFromLayout, formatTotal, isChoice, pickExact, pickToMarks, type PaperFormat } from './paper-format.js';
+import type { SchemeLayout } from '../documents/marking-scheme-parser.js';
+import { Prisma } from '../generated/prisma/client.js';
+import type { ConceptGroup, MarkingScheme, QuestionBankItem } from '../generated/prisma/client.js';
 import type { QuestionType } from '../generated/prisma/enums.js';
 
 export interface Shortfall {
@@ -25,7 +29,40 @@ export class BlueprintsService {
     return this.prisma.blueprint.findMany({ where: { sessionId }, orderBy: { createdAt: 'desc' } });
   }
 
+  /** Past papers in these terms with a known layout, and how much of each section the approved bank can fill. */
+  async formats(sessionIds: string[]) {
+    if (!sessionIds.length) return [];
+    const docs = await this.prisma.sourceDocument.findMany({
+      where: { sessionId: { in: sessionIds }, docType: 'PAST_PAPER', layout: { not: Prisma.DbNull } },
+      include: { session: true },
+      orderBy: { uploadedAt: 'desc' },
+    });
+    const pool = await this.pastPool(sessionIds, null);
+    return docs.map((d) => {
+      const format = formatFromLayout(d.layout as unknown as SchemeLayout, d);
+      return {
+        documentId: d.id,
+        title: d.title,
+        sessionLabel: d.session.label,
+        format,
+        total: formatTotal(format),
+        available: format.sections.map((s) => {
+          const inSection = pool.filter((q) => q.section === s.letter);
+          return {
+            letter: s.letter,
+            questions: inSection.length,
+            marks: inSection.reduce((a, q) => a + q.marks, 0),
+            // For a choice section, only questions of exactly the right marks fit.
+            fitting: isChoice(s) ? inSection.filter((q) => Math.abs(q.marks - s.marksEach) < 0.001).length : null,
+          };
+        }),
+      };
+    });
+  }
+
   async create(dto: CreateBlueprintDto) {
+    if (dto.formatDocumentId) return this.createFromFormat(dto, dto.formatDocumentId);
+    dto.topics ??= [];
     if (dto.objectiveCount + dto.theoryCount !== dto.totalCount) {
       throw new BadRequestException('objectiveCount + theoryCount must equal totalCount');
     }
@@ -65,6 +102,127 @@ export class BlueprintsService {
     });
   }
 
+  private async createFromFormat(dto: CreateBlueprintDto, documentId: string) {
+    const doc = await this.prisma.sourceDocument.findUnique({ where: { id: documentId }, include: { session: true } });
+    if (!doc?.layout) throw new BadRequestException('That past paper has no layout to follow. Upload it again as a marking scheme.');
+    const own = await this.prisma.session.findUniqueOrThrow({ where: { id: dto.sessionId } });
+    if (doc.session.courseId !== own.courseId) throw new BadRequestException('The past paper must belong to the same course.');
+    if (doc.sessionId === dto.sessionId) throw new BadRequestException('Set the new exam in a different term from the past paper it follows.');
+    const format = formatFromLayout(doc.layout as unknown as SchemeLayout, doc);
+    // Draw from the terms the instructor picked, always including the paper's own term.
+    const pastSessionIds = [...new Set([...(dto.pastSessionIds ?? []), doc.sessionId])];
+    const found = await this.prisma.session.count({ where: { id: { in: pastSessionIds }, courseId: own.courseId } });
+    if (found !== pastSessionIds.length) throw new BadRequestException('pastSessionIds must be sessions of the same course');
+    const sourceQuestions = await this.prisma.questionBankItem.findMany({ where: { sessionId: doc.sessionId, citation: { startsWith: doc.title } }, select: { type: true } });
+    const objective = sourceQuestions.filter((q) => q.type === 'OBJECTIVE').length;
+
+    return this.prisma.blueprint.create({
+      data: {
+        sessionId: dto.sessionId,
+        sourceMode: 'past_only',
+        pastQuestionRatio: 1,
+        targetCount: sourceQuestions.length,
+        objectiveCount: objective,
+        theoryCount: sourceQuestions.length - objective,
+        distribution: {},
+        pastSessionIds,
+        resultsRelease: dto.resultsRelease ?? 'hold',
+        format: format as never,
+      },
+    });
+  }
+
+  /** Approved past-paper questions in these terms, with their marks (an objective question is one mark). */
+  private async pastPool(sessionIds: string[], topics: string[] | null) {
+    const items = await this.prisma.questionBankItem.findMany({
+      where: { sessionId: { in: sessionIds }, source: 'PAST_PAPER', status: 'APPROVED', ...(topics?.length ? { topic: { in: topics } } : {}) },
+      include: { markingScheme: { include: { conceptGroups: true } } },
+      orderBy: [{ sessionId: 'asc' }, { sourceNumber: 'asc' }, { createdAt: 'asc' }],
+    });
+    return items.map((q) => ({ ...q, marks: q.type === 'OBJECTIVE' ? 1 : (q.markingScheme?.totalMarks ?? 0) }));
+  }
+
+  /**
+   * Fills a new exam to a past paper's layout: whole questions, section by
+   * section, to the same marks. Every question is copied into the exam's term
+   * as a draft with its marking scheme, to be reviewed and approved as usual.
+   */
+  private async generateFromFormat(blueprint: { sessionId: string; pastSessionIds: string[] }, format: PaperFormat) {
+    const existingBodies = (await this.prisma.questionBankItem.findMany({ where: { sessionId: blueprint.sessionId }, select: { body: true } })).map((q) => q.body);
+    const pool = await this.pastPool(blueprint.pastSessionIds.filter((id) => id !== blueprint.sessionId), null);
+    let skippedDuplicates = 0;
+    const fresh = pool.filter((q) => {
+      if (!isNearDuplicate(q.body, existingBodies)) return true;
+      skippedDuplicates++;
+      return false;
+    });
+
+    let created = 0;
+    const sections: { letter: string; title: string | null; wanted: string; got: string; short: boolean }[] = [];
+    for (const s of format.sections) {
+      const inSection = fresh.filter((q) => q.section === s.letter);
+      const picked = isChoice(s) ? pickExact(inSection, s.count, s.marksEach) : pickToMarks(inSection, s.marks);
+      // Printed in the order they stood on their own papers.
+      picked.sort((a, b) => (a.sourceNumber ?? 0) - (b.sourceNumber ?? 0));
+      for (const item of picked) {
+        await this.copyIntoSession(item, blueprint.sessionId);
+        existingBodies.push(item.body);
+        created++;
+      }
+      const marks = picked.reduce((a, q) => a + q.marks, 0);
+      sections.push(
+        isChoice(s)
+          ? { letter: s.letter, title: s.title, wanted: `${s.count} questions of ${s.marksEach} marks`, got: `${picked.length} questions`, short: picked.length < s.count }
+          : { letter: s.letter, title: s.title, wanted: `${s.marks} marks`, got: `${picked.length} questions, ${marks} marks`, short: Math.abs(marks - s.marks) > 0.001 },
+      );
+    }
+    // Reported per section rather than per topic; the portal shows `sections`.
+    return { created, skippedDuplicates, shortfalls: [] as Shortfall[], sections };
+  }
+
+  /** A past question copied into another term as a fresh draft, with its marking scheme. */
+  private copyIntoSession(item: QuestionBankItem & { markingScheme: (MarkingScheme & { conceptGroups: ConceptGroup[] }) | null }, sessionId: string) {
+    return this.prisma.questionBankItem.create({
+      data: {
+        sessionId,
+        topic: item.topic,
+        difficulty: item.difficulty,
+        type: item.type,
+        source: 'PAST_PAPER',
+        status: 'DRAFT',
+        body: item.body,
+        options: item.options ?? undefined,
+        correctIndex: item.correctIndex ?? undefined,
+        citation: item.citation,
+        section: item.section,
+        sourceNumber: item.sourceNumber,
+        markingScheme: item.markingScheme
+          ? {
+              create: {
+                totalMarks: item.markingScheme.totalMarks,
+                ceilingPercent: item.markingScheme.ceilingPercent,
+                minWordCount: item.markingScheme.minWordCount,
+                modelAnswer: item.markingScheme.modelAnswer,
+                partialCreditNotes: item.markingScheme.partialCreditNotes,
+                zeroCreditNotes: item.markingScheme.zeroCreditNotes,
+                reusedFromBank: true,
+                conceptGroups: {
+                  create: item.markingScheme.conceptGroups.map((g) => ({
+                    canonicalTerm: g.canonicalTerm,
+                    synonyms: g.synonyms,
+                    marks: g.marks,
+                    required: g.required,
+                    notes: g.notes,
+                    order: g.order,
+                  })),
+                },
+              },
+            }
+          : undefined,
+      },
+    });
+  }
+
   async coverage(blueprintId: string) {
     const blueprint = await this.getOrThrow(blueprintId);
     const distribution = (blueprint.distribution as Record<string, number>) ?? {};
@@ -94,6 +252,7 @@ export class BlueprintsService {
 
   async generate(blueprintId: string) {
     const blueprint = await this.getOrThrow(blueprintId);
+    if (blueprint.format) return this.generateFromFormat(blueprint, blueprint.format as unknown as PaperFormat);
     const session = await this.prisma.session.findUniqueOrThrow({
       where: { id: blueprint.sessionId },
       include: { course: true },
@@ -215,42 +374,7 @@ export class BlueprintsService {
             skippedDuplicates++;
             continue;
           }
-          await this.prisma.questionBankItem.create({
-            data: {
-              sessionId: params.sessionId,
-              topic: item.topic,
-              difficulty: item.difficulty,
-              type: item.type,
-              source: 'PAST_PAPER',
-              status: 'DRAFT',
-              body: item.body,
-              options: item.options ?? undefined,
-              correctIndex: item.correctIndex ?? undefined,
-              markingScheme: item.markingScheme
-                ? {
-                    create: {
-                      totalMarks: item.markingScheme.totalMarks,
-                      ceilingPercent: item.markingScheme.ceilingPercent,
-                      minWordCount: item.markingScheme.minWordCount,
-                      modelAnswer: item.markingScheme.modelAnswer,
-                      partialCreditNotes: item.markingScheme.partialCreditNotes,
-                      zeroCreditNotes: item.markingScheme.zeroCreditNotes,
-                      reusedFromBank: true,
-                      conceptGroups: {
-                        create: item.markingScheme.conceptGroups.map((g) => ({
-                          canonicalTerm: g.canonicalTerm,
-                          synonyms: g.synonyms,
-                          marks: g.marks,
-                          required: g.required,
-                          notes: g.notes,
-                          order: g.order,
-                        })),
-                      },
-                    },
-                  }
-                : undefined,
-            },
-          });
+          await this.copyIntoSession(item, params.sessionId);
           params.existingBodies.push(item.body);
           created++;
           found++;

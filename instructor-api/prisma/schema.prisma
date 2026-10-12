@@ -146,6 +146,9 @@ model SourceDocument {
   extractedCount Int?
   // What the AI read from a handwritten or scanned paper, kept for checking.
   transcript     String?
+  // A marking scheme's layout: sections, their marks, and any "answer 3 from
+  // Section B" choice. A new exam can follow it (see Blueprint.format).
+  layout         Json?
 }
 
 model QuestionBankItem {
@@ -164,6 +167,9 @@ model QuestionBankItem {
   // re-reading the whole source document (spec: "citation chip").
   citation        String?
   citationExcerpt String?
+  // Where a past-paper question sat on its paper: "B" and 15 for Section B, question 15.
+  section         String?
+  sourceNumber    Int?
   rejectReason    String?
   version         Int            @default(1)
   createdAt       DateTime       @default(now())
@@ -237,6 +243,10 @@ model Blueprint {
   difficultyTargets Json?
   // "instant": candidates see results on submission; "hold": results go to the instructor first.
   resultsRelease    String   @default("hold")
+  // Follow a past paper's layout: {sourceDocumentId, sections: [{letter, title,
+  // marks} | {letter, title, count, choose, marksEach}]}. Questions are then
+  // drawn whole, section by section, to the same marks.
+  format            Json?
   createdAt         DateTime @default(now())
 }
 
@@ -266,6 +276,9 @@ model PaperVersion {
   publishedAt   DateTime     @default(now())
   publishedBy   String // actorName(user) — rank, full name and service number
   signatureHash String // sha256 of the published item set, so tampering after publishing is detectable
+  // Sections and the candidate's choices, frozen at publish: [{letter, title,
+  // choose?, instructions}]. Null for a paper without sections.
+  layout        Json?
   items         PaperItem[]
   examPackage   ExamPackage?
   scriptAnswers TheoryScriptAnswer[]
@@ -282,6 +295,7 @@ model PaperItem {
   question       QuestionBankItem @relation(fields: [questionId], references: [id])
   questionId     String
   position       Int
+  section        String? // the paper section this question is printed in
   // The approved marking scheme as it stood at publish time. Scripts for this
   // paper are marked against this, so later edits in the bank can't change them.
   markingSnapshot Json?

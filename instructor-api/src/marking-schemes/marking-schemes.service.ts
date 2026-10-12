@@ -45,8 +45,11 @@ export class MarkingSchemesService implements OnModuleInit {
     private readonly ollama: OllamaService,
     private readonly queue: AiQueueService,
   ) {
-    this.queue.register('scheme-draft', (id, model) => this.runDraft(id, model));
-    this.queue.register('scheme-test', (id, model) => this.runTest(id, model));
+    // Cancelled: the scheme is left as it was before the AI started, with a note saying so.
+    const cancelled = (what: string) => (id: string, by: string) =>
+      this.prisma.markingScheme.update({ where: { id }, data: { aiTask: null, aiTaskError: `Cancelled by ${by}: the AI ${what} was stopped before it finished.` } });
+    this.queue.register('scheme-draft', (id, model) => this.runDraft(id, model), cancelled('draft'));
+    this.queue.register('scheme-test', (id, model) => this.runTest(id, model), cancelled('test'));
   }
 
   /** A draft or test interrupted by a restart is put back in the queue. */

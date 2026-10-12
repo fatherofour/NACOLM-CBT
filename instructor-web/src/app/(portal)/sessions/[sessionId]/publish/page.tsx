@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { use, useState } from 'react';
-import { Alert, Button, Spinner, WizardSteps } from '@/components/nc/basics';
+import { Alert, Button, RadioCards, Spinner, WizardSteps } from '@/components/nc/basics';
 import { CoverageTable } from '@/components/nc/coverage';
 import { PublishConfirm, PublishReceipt } from '@/components/nc/publish';
 import { PageHead, Panel } from '@/components/shell/page-head';
@@ -16,7 +16,7 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day
 // Informational only — see the note on PublishConfirm. This never gates
 // anything; it just tells the reader how far away the planned date is.
 function countdown(examDate: string): string {
-  const days = Math.ceil((new Date(examDate + 'T00:00:00').getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
+  const days = Math.ceil((new Date(examDate.slice(0, 10) + 'T00:00:00').getTime() - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
   if (days === 0) return 'Exam day';
   if (days > 0) return `${days} day${days === 1 ? '' : 's'} away`;
   return `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`;
@@ -54,7 +54,7 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
   const blocked = pending
     ? `${pending} question${pending === 1 ? ' is' : 's are'} still pending review.`
     : theoryNoScheme
-      ? `${theoryNoScheme} theory question${theoryNoScheme === 1 ? ' has' : 's have'} no approved marking scheme. Open ${theoryNoScheme === 1 ? 'it' : 'each'} in review, check the scheme and approve it.`
+      ? `${theoryNoScheme} marking scheme${theoryNoScheme === 1 ? ' is' : 's are'} not approved yet. Each theory question needs its marking scheme approved before the paper can be published.`
       : !approved.length
         ? 'There are no approved questions to publish.'
         : '';
@@ -99,7 +99,27 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
           <Panel className="flex min-w-0 flex-1 flex-col gap-4 p-4 md:p-6">
             <h2 className="t-title m-0">Blueprint coverage</h2>
-            {d.coverage.length ? <CoverageTable rows={d.coverage} /> : <p className="m-0 text-ink-muted">No blueprint for this term, so there’s nothing to check coverage against.</p>}
+            {d.blueprint?.format ? (
+              <div className="flex flex-col gap-2">
+                <p className="m-0">
+                  Set to the layout of <b>{d.blueprint.format.sourceTitle}</b>. Questions are printed section by section, as on that paper.
+                </p>
+                <ul className="m-0 pl-5">
+                  {d.blueprint.format.sections.map((s) => {
+                    const n = approved.filter((q) => q.section === s.letter).length;
+                    return (
+                      <li key={s.letter}>
+                        {s.letter ? `Section ${s.letter}${s.title ? ` (${s.title})` : ''}` : 'Whole paper'}: {'choose' in s ? `${n} of ${s.count} questions approved, candidates answer ${s.choose}` : `${n} questions approved, ${s.marks} marks`}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : d.coverage.length ? (
+              <CoverageTable rows={d.coverage} />
+            ) : (
+              <p className="m-0 text-ink-muted">No blueprint for this term, so there’s nothing to check coverage against.</p>
+            )}
             {gaps.length && !blocked ? (
               <Alert tone="caution" title="You can publish with gaps, but they’re part of the record">
                 To close them, go back to <Link href={`/sessions/${sessionId}/review`}>review</Link> and approve more questions in those topics.
@@ -120,7 +140,7 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
                 <PublishReceipt version={latest.versionNumber} examDate={fmtDate(latest.examDate)} publishedBy={latest.publishedBy} publishedAt={fmt(latest.publishedAt)} signature={latest.signatureHash} />
               </>
             ) : null}
-            {latest ? <PackagePanel paperVersionId={latest.id} isOfficer={isOfficer} /> : null}
+            {latest ? <DeliveryPanel paperVersionId={latest.id} isOfficer={isOfficer} /> : null}
             {error ? <Alert tone="error" title="Couldn’t publish">{error}</Alert> : null}
             {isOfficer && latest && !again ? (
               <div className="flex flex-col items-start gap-2">
@@ -134,6 +154,15 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
                 nextVersion={(latest?.versionNumber ?? 0) + 1}
                 summary={[['Questions', String(approved.length)], ['Coverage gaps', String(gaps.length)], ['Published by', `${user.rank} ${user.fullName}`]]}
                 blockedReason={blocked || undefined}
+                blockedAction={
+                  theoryNoScheme && !pending ? (
+                    <Link className="btnlink primary" href={`/sessions/${sessionId}/review?schemes=todo`}>
+                      Check and approve the {theoryNoScheme === 1 ? 'marking scheme' : `${theoryNoScheme} marking schemes`}
+                    </Link>
+                  ) : pending ? (
+                    <Link className="btnlink primary" href={`/sessions/${sessionId}/review`}>Go to review</Link>
+                  ) : undefined
+                }
                 busy={busy}
                 theoryCount={theoryCount}
                 onPublish={publish}
@@ -147,6 +176,42 @@ export default function PublishPage({ params }: { params: Promise<{ sessionId: s
         </div>
       ) : null}
     </>
+  );
+}
+
+/** A published paper is sat either on the exam centre's computers or on printed paper. */
+function DeliveryPanel({ paperVersionId, isOfficer }: { paperVersionId: string; isOfficer: boolean }) {
+  const [mode, setMode] = useState<'cbt' | 'print'>('cbt');
+  return (
+    <>
+      <RadioCards
+        label="How will candidates sit this paper?"
+        value={mode}
+        onChange={(v) => setMode(v as 'cbt' | 'print')}
+        options={[
+          { value: 'cbt', title: 'On computers (CBT)', description: 'Package it for the exam centre’s venue server.' },
+          { value: 'print', title: 'On paper', description: 'Print the paper for candidates and the marking scheme for instructors.' },
+        ]}
+      />
+      {mode === 'cbt' ? <PackagePanel paperVersionId={paperVersionId} isOfficer={isOfficer} /> : <PrintPanel paperVersionId={paperVersionId} />}
+    </>
+  );
+}
+
+function PrintPanel({ paperVersionId }: { paperVersionId: string }) {
+  return (
+    <div className="nc-freeze">
+      <p className="t-title">Print this version</p>
+      <p>
+        Both copies follow the layout of the past paper this exam was set from: the same heading, sections and instructions. They print exactly this
+        published version, so the marking scheme matches what scripts are marked against.
+      </p>
+      <div className="nc-row">
+        <a className="btnlink primary" href={`/print/paper/${paperVersionId}?copy=candidate`} target="_blank" rel="noopener">Candidates’ paper</a>
+        <a className="btnlink" href={`/print/paper/${paperVersionId}?copy=scheme`} target="_blank" rel="noopener">Marking scheme (instructors)</a>
+      </div>
+      <p className="m-0 text-sm text-ink-muted">Check the paper name, course and time at the top of the print page before printing. Keep the marking scheme with instructors only.</p>
+    </div>
   );
 }
 

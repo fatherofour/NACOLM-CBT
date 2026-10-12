@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Agent } from 'undici';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
@@ -16,6 +17,20 @@ const noTimeouts = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
  */
 @Injectable()
 export class OllamaService {
+  // The AI queue runs each job inside withSignal, so cancelling a job aborts
+  // whichever model call it is waiting on; Ollama stops generating as soon as
+  // the connection closes.
+  private readonly cancel = new AsyncLocalStorage<AbortSignal>();
+
+  withSignal<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+    return this.cancel.run(signal, fn);
+  }
+
+  /** True once the job running this code has been cancelled; loops check it between model calls. */
+  cancelled(): boolean {
+    return this.cancel.getStore()?.aborted ?? false;
+  }
+
   /** One-shot, non-streaming generation. `images` are base64 (no `data:` prefix). */
   async generate(params: {
     model: string;
@@ -25,6 +40,8 @@ export class OllamaService {
     think?: boolean;
     keepAlive?: string;
   }): Promise<string> {
+    const signal = this.cancel.getStore();
+    signal?.throwIfAborted();
     const res = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,6 +57,7 @@ export class OllamaService {
         stream: true,
       }),
       dispatcher: noTimeouts,
+      signal,
     } as RequestInit);
     if (!res.ok || !res.body) {
       throw new Error(`ollama /api/generate failed (${res.status}): ${await res.text()}`);

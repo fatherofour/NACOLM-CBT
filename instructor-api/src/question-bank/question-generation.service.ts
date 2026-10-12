@@ -33,7 +33,21 @@ export class QuestionGenerationService {
     private readonly ollama: OllamaService,
     private readonly queue: AiQueueService,
   ) {
-    this.queue.register('generate-similar', (target, model) => this.run(target, model));
+    this.queue.register(
+      'generate-similar',
+      (target, model) => this.run(target, model),
+      async (target, by) => {
+        const { sessionId } = JSON.parse(target) as { sessionId: string };
+        const status = this.runs.get(sessionId);
+        if (status) {
+          Object.assign(status, {
+            state: 'failed',
+            error: `Cancelled by ${by}${status.created ? ` after ${status.created} question${status.created === 1 ? '' : 's'}; they are kept as drafts` : ''}.`,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      },
+    );
   }
 
   private async seeds(sessionId: string, topic?: string) {
@@ -75,7 +89,7 @@ export class QuestionGenerationService {
       const seeds = shuffle(await this.seeds(sessionId, topic ?? undefined));
       const bodies = (await this.prisma.questionBankItem.findMany({ where: { sessionId }, select: { body: true } })).map((q) => q.body);
       // Spread the new questions across different past questions, cycling if asked for more than there are.
-      for (let i = 0; i < count && seeds.length; i++) {
+      for (let i = 0; i < count && seeds.length && !this.ollama.cancelled(); i++) {
         const seed = seeds[i % seeds.length];
         const scheme = seed.markingScheme!;
         try {

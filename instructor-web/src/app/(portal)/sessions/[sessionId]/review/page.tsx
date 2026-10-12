@@ -1,11 +1,13 @@
 'use client';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { use, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, EmptyState, ReviewProgress, Spinner, WizardSteps } from '@/components/nc/basics';
 import { QuestionRow, type EditPayload } from '@/components/nc/question-row';
 import { CoverageTable } from '@/components/nc/coverage';
 import { PageHead, Panel } from '@/components/shell/page-head';
-import { SchemePanel } from './scheme-panel';
+import { SchemePanel, type SchemeNav } from './scheme-panel';
+import { CancelAiButton } from '@/components/shell/ai-status';
 import { api, qs, type Blueprint, type CoverageRow, type GenerationStatus, type Question } from '@/lib/api';
 import { sessionInfo } from '@/lib/session-info';
 import { useData } from '@/lib/use-data';
@@ -21,11 +23,14 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
     return bps[0] ? api.get<CoverageRow[]>(`/blueprints/${bps[0].id}/coverage`) : null;
   }, [sessionId]);
 
-  const [filter, setFilter] = useState({ status: 'all', type: 'all', topic: 'all' });
+  // From the publish page's "Can't publish yet": show the marking schemes still to approve.
+  const fromPublish = useSearchParams().get('schemes') === 'todo';
+  const [filter, setFilter] = useState({ status: fromPublish ? 'SCHEME' : 'all', type: 'all', topic: 'all' });
   const [busyId, setBusyId] = useState('');
   const [actionError, setActionError] = useState('');
   const [bucketWarning, setBucketWarning] = useState('');
   const [schemeFor, setSchemeFor] = useState<Question | null>(null);
+  const [navList, setNavList] = useState<string[]>([]);
   const [confirmBulk, setConfirmBulk] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
@@ -33,9 +38,12 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
   const all = useMemo(() => [...(qsData.data ?? [])].sort((a, b) => a.createdAt.localeCompare(b.createdAt)), [qsData.data]);
   const numbers = new Map(all.map((q, i) => [q.id, i + 1]));
   const topics = [...new Set(all.map((q) => q.topic))].sort();
+  // A theory question needs its marking scheme approved as well as the question itself.
+  const schemeToApprove = (q: Question) => q.type === 'THEORY' && q.status !== 'REJECTED' && q.markingScheme?.status !== 'APPROVED';
+  const schemesLeft = all.filter(schemeToApprove).length;
   const shown = all.filter(
     (q) =>
-      (filter.status === 'all' || q.status === filter.status) &&
+      (filter.status === 'all' || (filter.status === 'SCHEME' ? schemeToApprove(q) : q.status === filter.status)) &&
       (filter.type === 'all' || q.type === filter.type) &&
       (filter.topic === 'all' || q.topic === filter.topic),
   );
@@ -91,6 +99,34 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
     }
   }
 
+  /** Opens a scheme; previous / next then move through `list` (the theory questions in view), fixed while the panel is open. */
+  function openScheme(q: Question, list: Question[] = shown.filter((x) => x.type === 'THEORY')) {
+    setNavList(list.map((x) => x.id));
+    setSchemeFor(q);
+  }
+
+  function openSchemesToApprove() {
+    setFilter({ status: 'SCHEME', type: 'all', topic: 'all' });
+    const todo = all.filter(schemeToApprove);
+    if (todo.length) openScheme(todo[0], todo);
+  }
+
+  // Arriving from "Can't publish yet": open the first scheme still to approve once the questions have loaded.
+  const [openTodo, setOpenTodo] = useState(fromPublish);
+  if (openTodo && qsData.data) {
+    setOpenTodo(false);
+    const todo = all.filter(schemeToApprove);
+    if (todo.length) openScheme(todo[0], todo);
+  }
+
+  // Previous / next through the theory questions in view, so schemes can be read and approved in one go.
+  const theoryShown = navList.map((id) => all.find((q) => q.id === id)).filter((q): q is Question => !!q);
+  function schemeNav(current: Question): SchemeNav | undefined {
+    const index = theoryShown.findIndex((q) => q.id === current.id);
+    if (index < 0) return undefined;
+    return { index, total: theoryShown.length, go: (delta) => setSchemeFor(theoryShown[index + delta] ?? current) };
+  }
+
   const loadError = info.error || qsData.error;
   return (
     <>
@@ -111,7 +147,7 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
               <div className="grid grid-cols-2 gap-3 border-t border-line pt-4 md:flex md:flex-wrap md:items-end">
                 <label className="label">Status
                   <select value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })}>
-                    <option value="all">All</option><option value="DRAFT">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option>
+                    <option value="all">All</option><option value="DRAFT">Pending</option><option value="SCHEME">Marking scheme to approve</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option>
                   </select>
                 </label>
                 <label className="label">Type
@@ -144,7 +180,17 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
             {actionError ? <Alert tone="error" title="That didn’t save">{actionError}</Alert> : null}
             {bucketWarning ? <Alert tone="caution" title="Blueprint can’t be met">{bucketWarning}</Alert> : null}
 
-            {all.length && pending === 0 ? (
+            {all.length && pending === 0 && schemesLeft ? (
+              <div className="flex flex-col gap-3 rounded-lg border-2 border-caution bg-caution-soft p-4 md:flex-row md:items-center">
+                <div className="flex-1">
+                  <p className="m-0 font-[650]">
+                    {schemesLeft} marking scheme{schemesLeft === 1 ? ' still needs' : 's still need'} your approval
+                  </p>
+                  <p className="m-0 text-sm">Every question is approved, but the paper can’t be published until each theory question’s marking scheme is approved too. Read each one and approve it; it takes a few seconds each.</p>
+                </div>
+                <Button variant="primary" onClick={openSchemesToApprove}>Check and approve {schemesLeft === 1 ? 'it' : `the ${schemesLeft}`}</Button>
+              </div>
+            ) : all.length && pending === 0 ? (
               <EmptyState
                 title={`All ${all.length} reviewed`}
                 body={`${approved} approved, ${rejected} rejected. Check coverage before the paper is published.`}
@@ -166,7 +212,7 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
                   onApprove={() => act(q, () => api.post<Question>(`/question-bank/${q.id}/approve`))}
                   onReject={(r) => reject(q, r)}
                   onEdit={(p) => edit(q, p)}
-                  onScheme={() => setSchemeFor(q)}
+                  onScheme={() => openScheme(q)}
                 />
               ))}
             </div>
@@ -186,13 +232,12 @@ export default function ReviewPage({ params }: { params: Promise<{ sessionId: st
 
       {schemeFor ? (
         <SchemePanel
-          question={schemeFor}
+          key={schemeFor.id}
+          question={all.find((q) => q.id === schemeFor.id) ?? schemeFor}
           number={numbers.get(schemeFor.id)!}
+          nav={schemeNav(schemeFor)}
           onClose={() => setSchemeFor(null)}
-          onSaved={() => {
-            setSchemeFor(null);
-            void qsData.reload();
-          }}
+          onSaved={() => void qsData.reload()}
         />
       ) : null}
     </>
@@ -260,6 +305,13 @@ function GeneratePanel({ sessionId, topics, theoryWithAnswers, onCreated }: { se
           {working ? 'Writing questions…' : 'Write new questions'}
         </Button>
         {working ? <Spinner label={`${status.created ?? 0} of ${status.requested} written so far`} /> : null}
+        {working ? (
+          <CancelAiButton
+            jobId={`generate:${sessionId}`}
+            label="Stop writing"
+            onCancelled={() => void api.get<GenerationStatus>(`/question-bank/generate-similar/status${qs({ sessionId })}`).then(setStatus, () => undefined)}
+          />
+        ) : null}
       </div>
       {status.state === 'done' ? (
         <p className="m-0 text-sm">
