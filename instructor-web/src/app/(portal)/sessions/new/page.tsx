@@ -11,6 +11,7 @@ import { useData } from '@/lib/use-data';
 
 type Source = 'past_only' | 'study_material_only' | 'both';
 const STEPS = ['Source', 'Count and difficulty', 'Results', 'Generate'];
+const PAST_STEPS = ['Source', 'Count', 'Results', 'Generate'];
 const NEW = '__new__';
 
 interface YearInfo { session: Session; count: number; topics: string[] }
@@ -71,6 +72,8 @@ function Wizard() {
   const course = courses?.find((c) => c.id === courseId);
   const isNewTerm = sessionId === NEW;
   const usesBank = source !== 'study_material_only';
+  // Past questions are drawn whole as they were set, so there is no difficulty split to choose.
+  const asksDifficulty = source !== 'past_only';
   const needsMaterial = source !== 'past_only';
 
   // Past-paper questions per term of this course (the "years").
@@ -137,7 +140,7 @@ function Wizard() {
     if (step === 1 && !usesFormat) {
       if (total < 1) return 'Enter how many questions';
       if (mix.objective + mix.theory !== total) return 'Objective + theory must equal the total';
-      if (diff.easy + diff.medium + diff.hard !== total) return 'Easy + moderate + hard must equal the total';
+      if (asksDifficulty && diff.easy + diff.medium + diff.hard !== total) return 'Easy + moderate + hard must equal the total';
       if (!topics.length) return 'Add at least one topic';
       if (usesBank && pool < bankNeed) return `The selected years hold ${pool} approved questions; ${bankNeed} are needed from the bank. Lower the count or pick more years.`;
     }
@@ -170,7 +173,7 @@ function Wizard() {
         theoryCount: mix.theory,
         topics,
         pastSessionIds: usesBank ? years : [],
-        difficultyTargets: diff,
+        difficultyTargets: asksDifficulty ? diff : undefined,
         resultsRelease: release,
       });
       setResult(await api.post<GenResult>(`/blueprints/${bp.id}/generate`));
@@ -197,7 +200,7 @@ function Wizard() {
         />
       ) : null}
       <div className={`flex max-w-[960px] flex-col gap-6 ${courses && !courses.length ? 'hidden' : ''}`}>
-        <WizardSteps steps={STEPS} current={step} />
+        <WizardSteps steps={asksDifficulty ? STEPS : PAST_STEPS} current={step} />
         <Panel className="flex flex-col gap-5 p-4 md:p-6">
           {step === 0 ? (
             <>
@@ -363,20 +366,24 @@ function Wizard() {
 
           {step === 1 && !usesFormat ? (
             <>
-              <h2 className="t-title m-0">How many questions, and how hard?</h2>
+              <h2 className="t-title m-0">{asksDifficulty ? 'How many questions, and how hard?' : 'How many questions?'}</h2>
               <div className="grid grid-cols-3 gap-3 md:flex">
                 <label className="label">Total<input type="number" min={1} value={total} onChange={(e) => setTotal(num(e.target.value))} className="md:!w-36" /></label>
                 <label className="label">Objective<input type="number" min={0} value={mix.objective} onChange={(e) => setMix({ ...mix, objective: num(e.target.value) })} className="md:!w-36" /></label>
                 <label className="label">Theory<input type="number" min={0} value={mix.theory} onChange={(e) => setMix({ ...mix, theory: num(e.target.value) })} className="md:!w-36" /></label>
               </div>
               <SumCheck parts={[['objective', mix.objective], ['theory', mix.theory]]} total={total} />
-              <h3 className="t-heading m-0 mt-2">Difficulty</h3>
-              <div className="grid grid-cols-3 gap-3 md:flex">
-                <label className="label">Easy<input type="number" min={0} value={diff.easy} onChange={(e) => setDiff({ ...diff, easy: num(e.target.value) })} className="md:!w-36" /></label>
-                <label className="label">Moderate<input type="number" min={0} value={diff.medium} onChange={(e) => setDiff({ ...diff, medium: num(e.target.value) })} className="md:!w-36" /></label>
-                <label className="label">Hard<input type="number" min={0} value={diff.hard} onChange={(e) => setDiff({ ...diff, hard: num(e.target.value) })} className="md:!w-36" /></label>
-              </div>
-              <SumCheck parts={[['easy', diff.easy], ['moderate', diff.medium], ['hard', diff.hard]]} total={total} />
+              {asksDifficulty ? (
+                <>
+                  <h3 className="t-heading m-0 mt-2">Difficulty</h3>
+                  <div className="grid grid-cols-3 gap-3 md:flex">
+                    <label className="label">Easy<input type="number" min={0} value={diff.easy} onChange={(e) => setDiff({ ...diff, easy: num(e.target.value) })} className="md:!w-36" /></label>
+                    <label className="label">Moderate<input type="number" min={0} value={diff.medium} onChange={(e) => setDiff({ ...diff, medium: num(e.target.value) })} className="md:!w-36" /></label>
+                    <label className="label">Hard<input type="number" min={0} value={diff.hard} onChange={(e) => setDiff({ ...diff, hard: num(e.target.value) })} className="md:!w-36" /></label>
+                  </div>
+                  <SumCheck parts={[['easy', diff.easy], ['moderate', diff.medium], ['hard', diff.hard]]} total={total} />
+                </>
+              ) : null}
               <h3 className="t-heading m-0 mt-2">Topics</h3>
               <p className="m-0 -mt-3 text-sm text-ink-muted">Questions are spread evenly across these topics.</p>
               <TagInput value={topics} onChange={setTopics} label="Topics" />
@@ -439,7 +446,7 @@ function Wizard() {
                   <>
                     <div><dt>Total</dt><dd>{total} questions</dd></div>
                     <div><dt>Objective / theory</dt><dd>{mix.objective} / {mix.theory}</dd></div>
-                    <div><dt>Easy / moderate / hard</dt><dd>{diff.easy} / {diff.medium} / {diff.hard}</dd></div>
+                    {asksDifficulty ? <div><dt>Easy / moderate / hard</dt><dd>{diff.easy} / {diff.medium} / {diff.hard}</dd></div> : null}
                     <div><dt>Results</dt><dd>{release === 'hold' ? 'Sent to instructor first' : 'Published on submission'}</dd></div>
                     <div className="col-span-2 md:col-span-4"><dt>Topics</dt><dd>{topics.join(', ')}</dd></div>
                   </>
