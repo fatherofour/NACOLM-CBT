@@ -6,6 +6,7 @@ import { api, type AiQueueStatus } from '@/lib/api';
 export function describeAiJob(running: NonNullable<AiQueueStatus['running']>): string {
   if (running.id.startsWith('scheme:')) return 'Working on a marking scheme';
   if (running.id.startsWith('paper:')) return 'Reading a handwritten paper';
+  if (running.id.startsWith('script:')) return 'Reading a candidate’s script';
   if (running.id.startsWith('generate:')) return 'Writing new questions';
   return running.stage === 'ocr' ? 'Reading a script' : 'Marking a script';
 }

@@ -172,6 +172,7 @@ export interface ScriptAnswer {
   questionId: string;
   imagePath: string;
   extraImagePaths: string[];
+  scriptUploadId: string | null; // set when cut from a whole script
   uploadedBy: string;
   uploadedAt: string;
   transcribedText: string | null;
@@ -262,6 +263,21 @@ export interface ScriptQueue {
 export interface BulkUploadResult {
   queued: { candidate: string; question: string; pages: number }[];
   unassigned: { file: string; reason: string }[];
+}
+
+/** A candidate's whole handwritten script, split by question once the AI has read it. */
+export interface ScriptUpload {
+  id: string;
+  paperVersionId: string;
+  candidateId: string;
+  candidate: Candidate;
+  pagePaths: string[];
+  pageTexts: string[];
+  status: 'reading' | 'filed' | 'failed';
+  error: string | null;
+  split: { questionId: string; number: number; theory: boolean; found: boolean; answered: boolean; pages: number[]; published: boolean }[] | null;
+  uploadedBy: string;
+  uploadedAt: string;
 }
 
 export interface UnassignedScan {

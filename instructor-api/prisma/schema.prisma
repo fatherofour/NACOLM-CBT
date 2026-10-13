@@ -282,6 +282,7 @@ model PaperVersion {
   items         PaperItem[]
   examPackage   ExamPackage?
   scriptAnswers TheoryScriptAnswer[]
+  scriptUploads ScriptUpload[]
   unassignedScans UnassignedScan[]
   venueResults  VenueResult[]
 
@@ -319,6 +320,7 @@ model Candidate {
   createdAt  DateTime @default(now())
 
   scriptAnswers TheoryScriptAnswer[]
+  scriptUploads ScriptUpload[]
   venueResults  VenueResult[]
 
   @@unique([sessionId, armyNumber])
@@ -370,6 +372,9 @@ model TheoryScriptAnswer {
   // Set by bulk upload: pages arriving in later chunks of the same upload are
   // merged into this answer instead of replacing it.
   uploadBatchId   String?
+  // Set when the answer was cut from a whole script (see ScriptUpload).
+  scriptUpload    ScriptUpload? @relation(fields: [scriptUploadId], references: [id], onDelete: SetNull)
+  scriptUploadId  String?
   uploadedBy      String
   uploadedAt      DateTime @default(now())
 
@@ -439,6 +444,32 @@ model VenueResult {
 
 // A bulk-uploaded page whose answer-sheet QR code couldn't be read or didn't
 // match this paper. It waits here until a person says whose answer it is.
+// One candidate's whole handwritten script: every page of the printed paper
+// they wrote their answers on. The AI reads each page, the text is split by
+// printed question number, and each theory answer is filed and marked like
+// any other script answer.
+model ScriptUpload {
+  id             String       @id @default(cuid())
+  paperVersion   PaperVersion @relation(fields: [paperVersionId], references: [id])
+  paperVersionId String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id])
+  candidateId    String
+  pagePaths      String[]
+  // What the AI read, one string per page, saved as it goes so a restart resumes.
+  pageTexts      String[]     @default([])
+  // "reading" | "filed" | "failed"
+  status         String       @default("reading")
+  error          String?
+  // Per question: [{questionId, number, found, answered, pages}]
+  split          Json?
+  uploadedBy     String
+  uploadedAt     DateTime     @default(now())
+
+  answers TheoryScriptAnswer[]
+
+  @@unique([paperVersionId, candidateId])
+}
+
 model UnassignedScan {
   id             String       @id @default(cuid())
   paperVersion   PaperVersion @relation(fields: [paperVersionId], references: [id])

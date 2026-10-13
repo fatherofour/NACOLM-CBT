@@ -16,6 +16,7 @@ import {
   type ScriptAnswer,
   type ScriptQueue,
   type ScriptStatus,
+  type ScriptUpload,
   type UnassignedScan,
 } from '@/lib/api';
 import { sessionInfo } from '@/lib/session-info';
@@ -85,17 +86,21 @@ export default function ScriptsPage({ params }: { params: Promise<{ sessionId: s
     () => (versionId ? api.get<UnassignedScan[]>(`/theory-scripts/unassigned${qs({ paperVersionId: versionId })}`) : Promise.resolve([] as UnassignedScan[])),
     [versionId],
   );
+  const wholes = useData(
+    () => (versionId ? api.get<ScriptUpload[]>(`/theory-scripts/whole${qs({ paperVersionId: versionId })}`) : Promise.resolve([] as ScriptUpload[])),
+    [versionId],
+  );
   const agreement = useData(
     () => (versionId ? api.get<MarkerAgreement[]>(`/theory-scripts/agreement${qs({ paperVersionId: versionId })}`) : Promise.resolve([] as MarkerAgreement[])),
     [versionId],
   );
 
   // OCR + marking run in the background on the server; keep refreshing while any are in flight.
-  const processing = scripts.data?.some((s) => s.status === 'UPLOADED') ?? false;
+  const processing = (scripts.data?.some((s) => s.status === 'UPLOADED') || wholes.data?.some((w) => w.status === 'reading')) ?? false;
   const [queue, setQueue] = useState<ScriptQueue>();
-  const reloadRef = useRef(scripts.reload);
+  const reloadRef = useRef(() => Promise.all([scripts.reload(), wholes.reload()]));
   useEffect(() => {
-    reloadRef.current = scripts.reload;
+    reloadRef.current = () => Promise.all([scripts.reload(), wholes.reload()]);
   });
   useEffect(() => {
     if (!processing) return;
@@ -136,7 +141,7 @@ export default function ScriptsPage({ params }: { params: Promise<{ sessionId: s
     <>
       <PageHead
         title="Theory scripts"
-        intro="Print QR-coded answer sheets, then scan the written pages in bulk. The system files each page to its candidate, reads the handwriting and proposes a mark with its reasoning; nothing counts until you have checked it against the scan and confirmed the mark."
+        intro="Scan each candidate’s whole script, or print QR-coded answer sheets and scan them in bulk. The system reads the handwriting, files each answer to its question and proposes a mark with its reasoning; nothing counts until you have checked it against the scan and confirmed the mark."
         crumbs={[['Exam sessions', '/sessions'], [info.data?.title ?? '…', `/sessions/${sessionId}/review`], ['Theory scripts']]}
         action={
           setup.data?.version ? (
@@ -160,11 +165,13 @@ export default function ScriptsPage({ params }: { params: Promise<{ sessionId: s
             questions={setup.data.theory}
             onUploaded={async (id) => {
               if (id) setSelectedId(id);
-              await Promise.all([scripts.reload(), unassigned.reload()]);
+              await Promise.all([scripts.reload(), unassigned.reload(), wholes.reload()]);
             }}
           />
 
           {processing && queue ? <QueueBar queue={queue} /> : null}
+
+          {wholes.data?.length ? <WholeScriptsPanel uploads={wholes.data} onChanged={async () => void (await wholes.reload())} /> : null}
 
           {unassigned.data?.length ? (
             <UnassignedPanel
@@ -274,13 +281,13 @@ function UploadPanel({
   questions: Question[];
   onUploaded: (id?: string) => Promise<void>;
 }) {
-  const [mode, setMode] = useState<'bulk' | 'single'>('bulk');
+  const [mode, setMode] = useState<'whole' | 'bulk' | 'single'>('whole');
   return (
     <Panel className="flex flex-col gap-4 p-4 md:p-6">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="t-title m-0 flex-1">Upload scans</h2>
         <div role="tablist" aria-label="Upload type" className="flex gap-1 rounded-md bg-surface-sunken p-1">
-          {(['bulk', 'single'] as const).map((m) => (
+          {(['whole', 'bulk', 'single'] as const).map((m) => (
             <button
               key={m}
               type="button"
@@ -289,18 +296,132 @@ function UploadPanel({
               onClick={() => setMode(m)}
               className={`rounded px-3 py-1.5 text-sm font-[600] ${mode === m ? 'bg-surface-raised shadow-sm' : 'text-ink-muted'}`}
             >
-              {m === 'bulk' ? 'Answer sheets (bulk)' : 'Single scan'}
+              {{ whole: 'Whole script', bulk: 'Answer sheets (bulk)', single: 'Single scan' }[m]}
             </button>
           ))}
         </div>
       </div>
       {!questions.length ? <Alert tone="caution" title="No theory questions on this paper">Only theory questions take a handwritten answer.</Alert> : null}
       {!candidates.length ? <Alert tone="caution" title="No active candidates">Add candidates first.</Alert> : null}
-      {mode === 'bulk' ? (
+      {mode === 'whole' ? (
+        <WholeUpload versionId={versionId} candidates={candidates} onUploaded={onUploaded} />
+      ) : mode === 'bulk' ? (
         <BulkUpload versionId={versionId} onUploaded={onUploaded} />
       ) : (
         <SingleUpload versionId={versionId} candidates={candidates} questions={questions} onUploaded={onUploaded} />
       )}
+    </Panel>
+  );
+}
+
+function WholeUpload({ versionId, candidates, onUploaded }: { versionId: string; candidates: Candidate[]; onUploaded: (id?: string) => Promise<void> }) {
+  const [candidateId, setCandidateId] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      const form = new FormData();
+      form.set('paperVersionId', versionId);
+      form.set('candidateId', candidateId);
+      // Photos are shrunk in the browser; a scanned PDF goes as it is.
+      for (const f of await Promise.all(files.map((f) => (/\.pdf$/i.test(f.name) ? f : shrink(f))))) form.append('files', f);
+      await api.upload<ScriptUpload>('/theory-scripts/whole', form);
+      setFiles([]);
+      setCandidateId('');
+      if (input.current) input.current.value = '';
+      await onUploaded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <CandidateSelect candidates={candidates} value={candidateId} onChange={setCandidateId} />
+        <label className="label">
+          The script: a scanned PDF, or photos of every page in order
+          <input ref={input} type="file" multiple accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFiles(Array.from(e.target.files ?? []))} />
+        </label>
+      </div>
+      <p className="m-0 text-sm text-ink-muted">
+        For scripts written on the printed question paper. The AI reads every page, finds each printed question and files the answer under it, even when it runs onto the next page, then marks it against the approved scheme. Examiner’s ink on a used script is ignored. Reading takes about 3 minutes a page. Uploading again for the same candidate replaces the earlier script.
+      </p>
+      {error ? <Alert tone="error" title="Couldn’t upload">{error}</Alert> : null}
+      <div className="flex justify-end">
+        <Button variant="primary" disabled={!candidateId || !files.length || busy} onClick={submit}>
+          {busy ? 'Uploading…' : 'Upload and mark'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function WholeScriptsPanel({ uploads, onChanged }: { uploads: ScriptUpload[]; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  async function reread(id: string) {
+    setBusy(id);
+    setError('');
+    try {
+      await api.post(`/theory-scripts/whole/${id}/read`, {});
+      await onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Couldn’t start reading again.');
+    } finally {
+      setBusy('');
+    }
+  }
+  return (
+    <Panel className="flex flex-col gap-3 p-4 md:p-6">
+      <h2 className="t-title m-0">Whole scripts ({uploads.length})</h2>
+      {error ? <Alert tone="error" title="Couldn’t read again">{error}</Alert> : null}
+      <ul className="m-0 flex list-none flex-col p-0">
+        {uploads.map((w) => {
+          const theory = (w.split ?? []).filter((q) => q.theory);
+          const filed = theory.filter((q) => q.answered && !q.published);
+          const missing = theory.filter((q) => !q.found).map((q) => `Q${q.number}`);
+          const blank = theory.filter((q) => q.found && !q.answered).map((q) => `Q${q.number}`);
+          return (
+            <li key={w.id} className="flex flex-col gap-1 border-t border-line py-3 first:border-t-0">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="flex-1 font-[650]">{w.candidate.rank} {w.candidate.fullName}</span>
+                {w.status === 'reading' ? (
+                  <Chip tone="bank">Reading page {Math.min(w.pageTexts.length + 1, w.pagePaths.length)} of {w.pagePaths.length}</Chip>
+                ) : w.status === 'failed' ? (
+                  <Chip tone="rejected">Couldn’t read</Chip>
+                ) : (
+                  <Chip tone="field">{filed.length} answer{filed.length === 1 ? '' : 's'} filed</Chip>
+                )}
+                {w.status !== 'reading' ? (
+                  <Button variant="quiet" disabled={!!busy} onClick={() => reread(w.id)}>
+                    {busy === w.id ? 'Starting…' : 'Read again'}
+                  </Button>
+                ) : null}
+              </span>
+              <span className="text-[13px] text-ink-muted">
+                {w.pagePaths.length} page{w.pagePaths.length === 1 ? '' : 's'}, uploaded {fmt(w.uploadedAt)} by {w.uploadedBy}
+                {w.status === 'filed' && filed.length ? `. Filed: ${filed.map((q) => `Q${q.number} (page ${q.pages.join(', ')})`).join(', ')}` : ''}
+              </span>
+              {w.status === 'failed' && w.error ? <span className="text-[13px] text-rejected">{w.error}</span> : null}
+              {w.status === 'filed' && (missing.length || blank.length) ? (
+                <span className="text-[13px]">
+                  {missing.length ? `Not found on the script: ${missing.join(', ')}. ` : ''}
+                  {blank.length ? `Printed but left blank: ${blank.join(', ')}. ` : ''}
+                  If the candidate did answer one of these, check the pages and file it with Single scan.
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
     </Panel>
   );
 }
@@ -674,7 +795,7 @@ function ScriptDetail({ script: s, onChanged }: { script: ScriptAnswer; onChange
         ) : null}
         {!locked && !processing ? (
           <div className="flex flex-wrap gap-2">
-            <Button variant="quiet" disabled={busy} onClick={() => run(() => api.post(`/theory-scripts/${s.id}/ocr`, {}))}>Read the scan again</Button>
+            <Button variant="quiet" disabled={busy} onClick={() => run(() => api.post(`/theory-scripts/${s.id}/ocr`, {}))}>{s.scriptUploadId ? 'Read the whole script again' : 'Read the scan again'}</Button>
             {s.transcribedText ? <Button variant="quiet" disabled={busy} onClick={() => run(() => api.post(`/theory-scripts/${s.id}/mark`, {}))}>Mark again</Button> : null}
             {s.transcribedText ? (
               <Button variant="quiet" disabled={busy} onClick={() => run(() => api.post(`/theory-scripts/${s.id}/mark`, { deep: true }))}>

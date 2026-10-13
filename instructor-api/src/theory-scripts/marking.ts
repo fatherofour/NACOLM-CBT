@@ -69,7 +69,19 @@ export function toSnapshot(s: {
   };
 }
 
-export const OCR_PROMPT = `Transcribe all handwritten text in this image exactly as the student wrote it. Preserve line breaks where they're meaningful (e.g. between numbered points). Do not summarize, correct spelling/grammar, or add any commentary or headers of your own — output only the transcription. Where a word is genuinely illegible, write [illegible] in its place.`;
+export const OCR_PROMPT = `Transcribe all handwritten text in this image exactly as the student wrote it. Preserve line breaks where they're meaningful (e.g. between numbered points). Do not summarize, correct spelling/grammar, or add any commentary or headers of your own — output only the transcription. Where a word is genuinely illegible, write [illegible] in its place. Leave out words the student has crossed out or struck through.`;
+
+// A page of a whole script: the printed questions are kept so the transcript
+// can be split into answers per question (see script-splitter.ts).
+export const SCRIPT_OCR_PROMPT = `This is one page of an exam script: a printed question paper on which a candidate has handwritten answers in blue or black ink. An examiner may also have written in red ink (ticks, crosses, numbers, scores).
+
+Transcribe the page from top to bottom:
+- Copy each printed question number and label exactly as printed (for example "1.", "a.", "b.", "4a."), followed by the printed question.
+- After each printed question, transcribe the candidate's handwritten answer exactly as written, keeping their numbering and line breaks. Do not correct spelling.
+- Ignore everything written by the examiner in red: ticks, crosses, marks, scores and comments.
+- Leave out words the candidate has crossed out or struck through; transcribe what they wrote instead of them.
+- Ignore page headers and footers such as RESTRICTED and page numbers.
+- Where a word is illegible, write [illegible]. Output only the transcription.`;
 
 // Crude backstop independent of the model: handwriting that talks to the marker
 // (rather than answering the question) is flagged so the reviewer sees it.

@@ -70,6 +70,34 @@ export class TheoryScriptsController {
     return this.scripts.bulkUpload({ paperVersionId, uploadedBy: actorName(user), files, batchId });
   }
 
+  // A candidate's whole script, written on the printed paper: PDF scans or photos of every page.
+  @Post('whole')
+  @UseInterceptors(FilesInterceptor('files', 40, { limits: { fileSize: 40 * 1024 * 1024, files: 40 } }))
+  async uploadWhole(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body('paperVersionId') paperVersionId: string,
+    @Body('candidateId') candidateId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!files?.length) throw new BadRequestException('attach the scanned pages of the script');
+    if (!paperVersionId || !candidateId) throw new BadRequestException('paperVersionId and candidateId are required');
+    if (files.some((f) => !/\.(pdf|jpe?g|png)$/i.test(f.originalname))) throw new BadRequestException('Only PDF, JPEG or PNG files can be uploaded.');
+    this.logger.log(`AI pipeline: whole script of ${files.length} file(s) uploaded by ${actorName(user)} for candidate ${candidateId}`);
+    return this.scripts.uploadWhole({ paperVersionId, candidateId, uploadedBy: actorName(user), files });
+  }
+
+  @Get('whole')
+  listWhole(@Query('paperVersionId') paperVersionId: string) {
+    if (!paperVersionId) throw new BadRequestException('paperVersionId is required');
+    return this.scripts.listWhole(paperVersionId);
+  }
+
+  @Post('whole/:id/read')
+  rereadWhole(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    this.logger.log(`AI pipeline: whole script ${id} read again by ${actorName(user)}`);
+    return this.scripts.rereadWhole(id);
+  }
+
   @Get()
   list(
     @Query('paperVersionId') paperVersionId?: string,

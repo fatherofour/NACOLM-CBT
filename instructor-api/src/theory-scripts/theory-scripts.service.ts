@@ -4,6 +4,7 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { Prisma } from '../generated/prisma/client.js';
 import { layoutOf } from '../papers/papers.service.js';
 import { OllamaService } from '../ollama/ollama.service.js';
 import type { MarkEventKind, ScriptAnswerStatus } from '../generated/prisma/enums.js';
@@ -11,7 +12,9 @@ import type { AiJob } from '../ai-queue/ai-queue.js';
 import { AiQueueService } from '../ai-queue/ai-queue.service.js';
 import { DEEP_MARKING_MODEL, isReasoningModel, KEEP_ALIVE, MARKING_MODEL, OCR_MODEL, thinkFlag } from '../ai-queue/models.js';
 import { encodeSheetCode, MAX_SHEET_PAGES, readSheetCode, type SheetCode } from './answer-sheet-code.js';
-import { MARKER_INSTRUCTION, markingPrompt, OCR_PROMPT, parseMarking, toSnapshot, type SchemeSnapshot } from './marking.js';
+import { MARKER_INSTRUCTION, markingPrompt, OCR_PROMPT, parseMarking, SCRIPT_OCR_PROMPT, toSnapshot, type SchemeSnapshot } from './marking.js';
+import { splitScript } from './script-splitter.js';
+import { pageImages } from '../documents/extract-text.js';
 
 const STORAGE_ROOT = process.env.SCRIPT_STORAGE_ROOT ?? './data/theory-scripts';
 
@@ -37,6 +40,7 @@ const PIPELINE_RESET = {
 };
 
 const SCAN_FILE = /\.(jpe?g|png)$/i;
+const MAX_SCRIPT_PAGES = 40;
 
 // Bulk-filed pages are stored as ..._p<n>.jpg so merged chunks can be put back in order.
 const pageNumberOf = (path: string) => Number(/_p(\d+)\.jpg$/.exec(path)?.[1] ?? 1);
@@ -62,6 +66,9 @@ export class TheoryScriptsService implements OnModuleInit {
     this.queue.register('mark', (id, model) => this.runMarking(id, model), (id, by) =>
       this.prisma.theoryScriptAnswer.update({ where: { id }, data: { status: 'AI_MARKING_FAILED' as ScriptAnswerStatus, aiError: `Cancelled by ${by} before the AI marked it.` } }),
     );
+    this.queue.register('script-ocr', (id) => this.readScript(id), (id, by) =>
+      this.prisma.scriptUpload.update({ where: { id }, data: { status: 'failed', error: `Cancelled by ${by} before the AI finished reading it. Read it again to carry on.` } }),
+    );
   }
 
   /** The queue lives in memory, so a restart would strand scripts mid-pipeline; pick them back up. */
@@ -75,7 +82,11 @@ export class TheoryScriptsService implements OnModuleInit {
       this.queue.add(s.transcribedText ? this.markJob(s.id) : this.ocrJob(s.id));
     }
     if (stranded.length) this.logger.log(`resumed ${stranded.length} theory script(s) left in the AI pipeline`);
+    const reading = await this.prisma.scriptUpload.findMany({ where: { status: 'reading' }, select: { id: true }, orderBy: { uploadedAt: 'asc' } });
+    for (const s of reading) this.queue.add(this.scriptJob(s.id));
   }
+
+  private scriptJob = (id: string): AiJob => ({ id: `script:${id}`, target: id, kind: 'script-ocr', stage: 'ocr', model: OCR_MODEL });
 
   private ocrJob = (id: string): AiJob => ({ id, stage: 'ocr', model: OCR_MODEL });
   private markJob = (id: string, deep = false): AiJob => ({ id, stage: 'mark', model: deep ? DEEP_MARKING_MODEL : MARKING_MODEL });
@@ -261,6 +272,130 @@ export class TheoryScriptsService implements OnModuleInit {
     return result;
   }
 
+  /**
+   * A candidate's whole script, written on the printed paper. Every page is
+   * read in one background job, then split into an answer per question.
+   */
+  async uploadWhole(params: { paperVersionId: string; candidateId: string; uploadedBy: string; files: Express.Multer.File[] }) {
+    this.assertQueueHasRoom();
+    const { version } = await this.paperContext(params.paperVersionId);
+    const candidate = await this.prisma.candidate.findUnique({ where: { id: params.candidateId } });
+    if (!candidate || candidate.sessionId !== version.paper.sessionId) throw new NotFoundException('candidate not found for this session');
+
+    const images: Buffer[] = [];
+    for (const file of params.files) images.push(...(await pageImages(file.buffer, file.originalname)));
+    if (!images.length) throw new BadRequestException('no pages could be read from those files');
+    if (images.length > MAX_SCRIPT_PAGES) throw new BadRequestException(`a script can have at most ${MAX_SCRIPT_PAGES} pages`);
+
+    const paths: string[] = [];
+    for (const [n, data] of images.entries()) {
+      // rotate() applies the phone's EXIF orientation before the page is stored.
+      const jpeg = await sharp(data).rotate().jpeg({ quality: 90 }).toBuffer();
+      paths.push(await this.storeScan(params.paperVersionId, params.candidateId, `script_p${n + 1}`, '.jpg', jpeg));
+    }
+    const key = { paperVersionId: params.paperVersionId, candidateId: params.candidateId };
+    const fresh = { pagePaths: paths, pageTexts: [], status: 'reading', error: null, uploadedBy: params.uploadedBy, uploadedAt: new Date() };
+    const upload = await this.prisma.scriptUpload.upsert({
+      where: { paperVersionId_candidateId: key },
+      update: { ...fresh, split: Prisma.DbNull },
+      create: { ...key, ...fresh },
+    });
+    this.queue.add(this.scriptJob(upload.id));
+    return upload;
+  }
+
+  listWhole(paperVersionId: string) {
+    return this.prisma.scriptUpload.findMany({
+      where: { paperVersionId },
+      include: { candidate: true },
+      orderBy: { uploadedAt: 'desc' },
+    });
+  }
+
+  async rereadWhole(id: string) {
+    this.assertQueueHasRoom();
+    const upload = await this.prisma.scriptUpload.findUnique({ where: { id } });
+    if (!upload) throw new NotFoundException('script not found');
+    const updated = await this.prisma.scriptUpload.update({ where: { id }, data: { pageTexts: [], status: 'reading', error: null, split: Prisma.DbNull } });
+    this.queue.add(this.scriptJob(id));
+    return updated;
+  }
+
+  /** Reads the script page by page, saving each page as it goes, then files the answers. */
+  async readScript(id: string) {
+    const upload = await this.prisma.scriptUpload.findUnique({ where: { id } });
+    if (!upload || upload.status !== 'reading') return;
+    const texts = [...upload.pageTexts];
+    try {
+      for (let n = texts.length; n < upload.pagePaths.length; n++) {
+        const buffer = await sharp(await readFile(upload.pagePaths[n]))
+          .resize({ width: OCR_MAX_PX, height: OCR_MAX_PX, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 88 })
+          .toBuffer();
+        texts.push(
+          (await this.ollama.generate({ model: OCR_MODEL, prompt: SCRIPT_OCR_PROMPT, images: [buffer.toString('base64')], keepAlive: KEEP_ALIVE })).trim(),
+        );
+        // A new upload replaced this one while it was being read; its own job will run.
+        const saved = await this.prisma.scriptUpload.updateMany({ where: { id, uploadedAt: upload.uploadedAt }, data: { pageTexts: texts } });
+        if (!saved.count) return;
+      }
+      await this.fileScript(id);
+    } catch (err) {
+      this.logger.error(`reading whole script ${id} failed: ${String(err)}`);
+      await this.prisma.scriptUpload.updateMany({ where: { id, uploadedAt: upload.uploadedAt }, data: { status: 'failed', error: String(err) } });
+    }
+  }
+
+  /**
+   * Splits what was read into an answer per theory question and queues each
+   * for marking. A question the candidate left blank or didn't choose is not
+   * filed; an answer filed from an earlier reading of this script that is no
+   * longer found is removed, unless already published.
+   */
+  private async fileScript(id: string) {
+    const upload = await this.prisma.scriptUpload.findUniqueOrThrow({ where: { id } });
+    const { version } = await this.paperContext(upload.paperVersionId);
+    const items = version.items.map((i, n) => ({ questionId: i.questionId, number: n + 1, body: i.question.body, type: i.question.type }));
+    const split = splitScript(upload.pageTexts, items);
+    const theory = new Set(items.filter((i) => i.type === 'THEORY').map((i) => i.questionId));
+
+    const existing = await this.prisma.theoryScriptAnswer.findMany({ where: { paperVersionId: upload.paperVersionId, candidateId: upload.candidateId } });
+    const published = new Set(existing.filter((a) => a.status === 'PUBLISHED').map((a) => a.questionId));
+    const filed = new Set<string>();
+    for (const a of split) {
+      if (!theory.has(a.questionId) || !a.answered || published.has(a.questionId)) continue;
+      const [imagePath, ...extraImagePaths] = a.pages.map((p) => upload.pagePaths[p]);
+      const key = { paperVersionId: upload.paperVersionId, candidateId: upload.candidateId, questionId: a.questionId };
+      const fields = { imagePath, extraImagePaths, transcribedText: a.text, ocrModel: OCR_MODEL, scriptUploadId: id, uploadedBy: upload.uploadedBy, uploadBatchId: null };
+      const answer = await this.prisma.theoryScriptAnswer.upsert({
+        where: { paperVersionId_candidateId_questionId: key },
+        update: { ...PIPELINE_RESET, ...fields, uploadedAt: new Date() },
+        create: { ...key, ...fields },
+      });
+      this.queue.add(this.markJob(answer.id));
+      filed.add(a.questionId);
+    }
+    await this.prisma.theoryScriptAnswer.deleteMany({
+      where: { scriptUploadId: id, status: { not: 'PUBLISHED' }, questionId: { notIn: [...filed] } },
+    });
+    await this.prisma.scriptUpload.update({
+      where: { id },
+      data: {
+        status: 'filed',
+        error: null,
+        split: split.map((a) => ({
+          questionId: a.questionId,
+          number: a.number,
+          theory: theory.has(a.questionId),
+          found: a.found,
+          answered: a.answered,
+          pages: a.pages.map((p) => p + 1),
+          published: published.has(a.questionId),
+        })),
+      },
+    });
+  }
+
   listUnassigned(paperVersionId: string) {
     return this.prisma.unassignedScan.findMany({ where: { paperVersionId }, orderBy: { uploadedAt: 'asc' } });
   }
@@ -370,6 +505,11 @@ export class TheoryScriptsService implements OnModuleInit {
     const answer = await this.get(id);
     if (answer.status === 'PUBLISHED') throw new BadRequestException('this result has already been published and can no longer be re-run');
     if (from === 'mark' && !answer.transcribedText) throw new BadRequestException('no transcription yet — run OCR first');
+    // Cut from a whole script: reading it again means reading every page of the script.
+    if (from === 'ocr' && answer.scriptUploadId) {
+      await this.rereadWhole(answer.scriptUploadId);
+      return this.get(id);
+    }
     await this.prisma.theoryScriptAnswer.update({
       where: { id },
       data: {
