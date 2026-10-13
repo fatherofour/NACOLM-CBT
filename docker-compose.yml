@@ -66,6 +66,9 @@ services:
       OCR_MAX_PX: ${OCR_MAX_PX:-1000}
       MARKING_MODEL: ${MARKING_MODEL:-qwen3:4b}
       DEEP_MARKING_MODEL: ${DEEP_MARKING_MODEL:-deepseek-r1}
+      # Set OCR_MODEL / MARKING_MODEL to a Claude model (e.g. claude-opus-5-5) to read
+      # and mark with Claude through Anthropic's API instead of the local models.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     networks:
       - default
       - ai
