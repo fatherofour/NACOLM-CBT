@@ -61,7 +61,8 @@ export async function hostedGenerate(params: { model: string; prompt: string; im
     const reply = (await res.json()) as { choices?: { message?: { content?: string | null }; finish_reason?: string }[] };
     const choice = reply.choices?.[0];
     if (choice?.finish_reason === 'length') throw new Error(`${provider.name}’s reply was cut off at the length limit`);
-    const text = choice?.message?.content?.trim();
+    // Some models (Qwen on Groq) put their reasoning in the reply between <think> tags.
+    const text = choice?.message?.content?.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
     if (!text) throw new Error(`${provider.name} returned no answer: ${JSON.stringify(reply).slice(0, 300)}`);
     return text;
   }
