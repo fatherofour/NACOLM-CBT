@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Agent } from 'undici';
 import { claudeGenerate, isClaudeModel } from './claude.js';
+import { isKimiModel, kimiGenerate } from './kimi.js';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434';
 
@@ -43,8 +44,9 @@ export class OllamaService {
   }): Promise<string> {
     const signal = this.cancel.getStore();
     signal?.throwIfAborted();
-    // A Claude model name sends the request to Anthropic's API instead.
+    // A Claude or Kimi model name sends the request to that provider's API instead.
     if (isClaudeModel(params.model)) return claudeGenerate({ model: params.model, prompt: params.prompt, images: params.images, signal });
+    if (isKimiModel(params.model)) return kimiGenerate({ model: params.model, prompt: params.prompt, images: params.images, signal });
     const res = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -86,7 +88,7 @@ export class OllamaService {
 
   /** Frees the model's memory now instead of after its keep-alive expires. */
   async unload(model: string): Promise<void> {
-    if (isClaudeModel(model)) return;
+    if (isClaudeModel(model) || isKimiModel(model)) return;
     await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

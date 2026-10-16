@@ -69,6 +69,8 @@ services:
       # Set OCR_MODEL / MARKING_MODEL to a Claude model (e.g. claude-opus-5-5) to read
       # and mark with Claude through Anthropic's API instead of the local models.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Or a Kimi model (e.g. kimi-k3) through Moonshot's API.
+      KIMI_API_KEY: ${KIMI_API_KEY:-}
     networks:
       - default
       - ai
