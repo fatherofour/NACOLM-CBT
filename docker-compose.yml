@@ -73,6 +73,8 @@ services:
       KIMI_API_KEY: ${KIMI_API_KEY:-}
       # Or a Gemini model (e.g. gemini-3.8-flash) through Google's API.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Or a model hosted on Groq, named groq/<model> (e.g. groq/qwen/qwen3.8-27b).
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
     networks:
       - default
       - ai

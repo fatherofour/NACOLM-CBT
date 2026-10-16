@@ -1,13 +1,16 @@
 import { Agent } from 'undici';
 
 // Hosted models reached through an OpenAI-compatible Chat Completions API, for
-// when OCR_MODEL / MARKING_MODEL name one: Kimi ("kimi-k3", Moonshot) or Gemini
-// ("gemini-3.8-flash", Google). Each needs its key on the server. The scripts
+// when OCR_MODEL / MARKING_MODEL name one: Kimi ("kimi-k3", Moonshot), Gemini
+// ("gemini-3.8-flash", Google) or a model hosted on Groq, named with a "groq/"
+// prefix ("groq/qwen/qwen3.8-27b"). Each needs its key on the server. The scripts
 // and schemes are sent to that provider, so the college must have agreed.
 
+// `strip`: the prefix only picks the provider and is not part of its model ID.
 const PROVIDERS = [
-  { name: 'Kimi', prefix: 'kimi-', baseUrl: process.env.KIMI_BASE_URL ?? 'https://api.moonshot.ai/v1', keyVar: 'KIMI_API_KEY' },
-  { name: 'Gemini', prefix: 'gemini-', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyVar: 'GEMINI_API_KEY' },
+  { name: 'Kimi', prefix: 'kimi-', strip: false, baseUrl: process.env.KIMI_BASE_URL ?? 'https://api.moonshot.ai/v1', keyVar: 'KIMI_API_KEY' },
+  { name: 'Gemini', prefix: 'gemini-', strip: false, baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyVar: 'GEMINI_API_KEY' },
+  { name: 'Groq', prefix: 'groq/', strip: true, baseUrl: 'https://api.groq.com/openai/v1', keyVar: 'GROQ_API_KEY' },
 ];
 
 const providerOf = (model: string) => PROVIDERS.find((p) => model.startsWith(p.prefix));
@@ -38,7 +41,8 @@ export async function hostedGenerate(params: { model: string; prompt: string; im
     { type: 'text', text: params.prompt },
   ];
   // No temperature, top_p or seed: Kimi K3's sampling is fixed, and the defaults suit the rest.
-  const body = JSON.stringify({ model: params.model, messages: [{ role: 'user', content }], max_tokens: 16000 });
+  const model = provider.strip ? params.model.slice(provider.prefix.length) : params.model;
+  const body = JSON.stringify({ model, messages: [{ role: 'user', content }], max_tokens: 16000 });
 
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${provider.baseUrl}/chat/completions`, {
