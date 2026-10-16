@@ -348,9 +348,9 @@ export class TheoryScriptsService implements OnModuleInit {
 
   /**
    * Splits what was read into an answer per theory question and queues each
-   * for marking. A question the candidate left blank or didn't choose is not
-   * filed; an answer filed from an earlier reading of this script that is no
-   * longer found is removed, unless already published.
+   * for marking. Every theory question gets an answer, so the instructor sees
+   * them all: one left blank, or not found on the pages, is filed at 0 with
+   * the reason, without asking the AI, for the instructor to confirm or correct.
    */
   private async fileScript(id: string) {
     const upload = await this.prisma.scriptUpload.findUniqueOrThrow({ where: { id } });
@@ -363,16 +363,30 @@ export class TheoryScriptsService implements OnModuleInit {
     const published = new Set(existing.filter((a) => a.status === 'PUBLISHED').map((a) => a.questionId));
     const filed = new Set<string>();
     for (const a of split) {
-      if (!theory.has(a.questionId) || !a.answered || published.has(a.questionId)) continue;
-      const [imagePath, ...extraImagePaths] = a.pages.map((p) => upload.pagePaths[p]);
+      if (!theory.has(a.questionId) || published.has(a.questionId)) continue;
+      // A question not found on the pages shows every page, so the instructor can look for it.
+      const pages = a.found ? a.pages : upload.pagePaths.map((_, n) => n);
+      const [imagePath, ...extraImagePaths] = pages.map((p) => upload.pagePaths[p]);
       const key = { paperVersionId: upload.paperVersionId, candidateId: upload.candidateId, questionId: a.questionId };
       const fields = { imagePath, extraImagePaths, transcribedText: a.text, ocrModel: OCR_MODEL, scriptUploadId: id, uploadedBy: upload.uploadedBy, uploadBatchId: null };
+      const blank = a.answered
+        ? null
+        : {
+            status: 'PENDING_REVIEW' as ScriptAnswerStatus,
+            aiScore: 0,
+            aiMaxScore: (await this.schemeFor(upload.paperVersionId, a.questionId))?.totalMarks ?? null,
+            aiModel: null,
+            aiJustification: a.found
+              ? 'No answer was written under this question on the script, so it scores 0. Check the scan before confirming.'
+              : 'This question was not found on the script, so it scores 0. Check the pages: if the candidate did answer it (for example on a page missing from the upload), upload that page or change the mark here with the reason.',
+          };
       const answer = await this.prisma.theoryScriptAnswer.upsert({
         where: { paperVersionId_candidateId_questionId: key },
-        update: { ...PIPELINE_RESET, ...fields, uploadedAt: new Date() },
-        create: { ...key, ...fields },
+        update: { ...PIPELINE_RESET, ...fields, ...blank, uploadedAt: new Date() },
+        create: { ...key, ...fields, ...blank },
       });
-      this.queue.add(this.markJob(answer.id));
+      if (blank) await this.event(answer.id, 'AI_PROPOSED', { score: 0, actor: 'System (no answer on the script)', reason: blank.aiJustification });
+      else this.queue.add(this.markJob(answer.id));
       filed.add(a.questionId);
     }
     await this.prisma.theoryScriptAnswer.deleteMany({

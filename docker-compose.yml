@@ -71,6 +71,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Or a Kimi model (e.g. kimi-k3) through Moonshot's API.
       KIMI_API_KEY: ${KIMI_API_KEY:-}
+      # Or a Gemini model (e.g. gemini-3.8-flash) through Google's API.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     networks:
       - default
       - ai
