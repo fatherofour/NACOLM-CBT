@@ -130,6 +130,27 @@ Judge each key point on whether the student's own words demonstrate the idea, no
 ${output}`;
 }
 
+/**
+ * The first complete JSON object in a model's reply. Models wrap it in prose,
+ * think aloud before it, or add a stray "}" after it; only the object counts.
+ */
+export function firstJsonObject(raw: string): string {
+  const start = raw.indexOf('{');
+  if (start < 0) return raw;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < raw.length; i++) {
+    const c = raw[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '{') depth++;
+    else if (c === '}' && --depth === 0) return raw.slice(start, i + 1);
+  }
+  return raw.slice(start);
+}
+
 const quarter = (n: number) => Math.round(n * 4) / 4;
 
 /**
@@ -138,7 +159,7 @@ const quarter = (n: number) => Math.round(n * 4) / 4;
  * REQUIRED point caps the total, and the result stays within 0..total.
  */
 export function parseMarking(raw: string, scheme: SchemeSnapshot): Marking {
-  const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
+  const jsonText = firstJsonObject(raw);
   const parsed = JSON.parse(jsonText) as { score?: unknown; justification?: unknown; points?: unknown };
   const justification = typeof parsed.justification === 'string' ? parsed.justification : String(parsed.justification ?? '');
   const total = scheme.totalMarks;

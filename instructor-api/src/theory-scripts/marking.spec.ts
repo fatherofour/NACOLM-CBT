@@ -1,4 +1,4 @@
-import { markingPrompt, parseMarking, type SchemeSnapshot } from './marking.js';
+import { firstJsonObject, markingPrompt, parseMarking, type SchemeSnapshot } from './marking.js';
 
 const scheme: SchemeSnapshot = {
   totalMarks: 10,
@@ -76,5 +76,12 @@ describe('parseMarking', () => {
   it('falls back to the holistic score and clamps it', () => {
     expect(parseMarking('noise {"score": 14, "justification": "j"}', { ...scheme, conceptGroups: [] }).score).toBe(10);
     expect(() => parseMarking('{"justification":"no score"}', { ...scheme, conceptGroups: [] })).toThrow();
+  });
+});
+
+describe('firstJsonObject', () => {
+  it('takes the first complete object, ignoring prose around it and a stray brace after it', () => {
+    expect(firstJsonObject('Here you go: {"score": 2, "note": "a } inside a string"}} thanks')).toBe('{"score": 2, "note": "a } inside a string"}');
+    expect(JSON.parse(firstJsonObject('{"points": [{"awarded": 2}], "score": 2}}'))).toEqual({ points: [{ awarded: 2 }], score: 2 });
   });
 });

@@ -2,6 +2,8 @@
 // instructor's model answer. It only ever produces a DRAFT: the instructor
 // edits it, tests it and approves it before it can mark anything.
 
+import { firstJsonObject } from '../theory-scripts/marking.js';
+
 export interface DraftPoint {
   canonicalTerm: string;
   marks: number;
@@ -52,7 +54,7 @@ const clean = (v: unknown, max: number) =>
 
 /** Validates and tidies the model's draft; throws if it is unusable. */
 export function parseDraft(raw: string): SchemeDraft {
-  const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
+  const jsonText = firstJsonObject(raw);
   const d = JSON.parse(jsonText) as {
     points?: { name?: unknown; marks?: unknown; required?: unknown; partial?: unknown; variations?: unknown }[];
     partialCredit?: unknown;

@@ -41,6 +41,7 @@ const PIPELINE_RESET = {
 
 const SCAN_FILE = /\.(jpe?g|png)$/i;
 const MAX_SCRIPT_PAGES = 40;
+const letters = (s: string) => s.match(/[a-z]/gi)?.length ?? 0;
 
 // Bulk-filed pages are stored as ..._p<n>.jpg so merged chunks can be put back in order.
 const pageNumberOf = (path: string) => Number(/_p(\d+)\.jpg$/.exec(path)?.[1] ?? 1);
@@ -332,9 +333,17 @@ export class TheoryScriptsService implements OnModuleInit {
           .resize({ width: OCR_MAX_PX, height: OCR_MAX_PX, fit: 'inside', withoutEnlargement: true })
           .jpeg({ quality: 88 })
           .toBuffer();
-        texts.push(
-          (await this.ollama.generate({ model: OCR_MODEL, prompt: SCRIPT_OCR_PROMPT, images: [buffer.toString('base64')], keepAlive: KEEP_ALIVE })).trim(),
-        );
+        const read = async () =>
+          (await this.ollama.generate({ model: OCR_MODEL, prompt: SCRIPT_OCR_PROMPT, images: [buffer.toString('base64')], keepAlive: KEEP_ALIVE })).trim();
+        let text = await read();
+        // A model sometimes answers with a remark ("The full page is transcribed
+        // as shown above.") instead of the page; every script page has its
+        // printed questions at least, so a reply that short is read again.
+        if (letters(text) < 60) {
+          const again = await read();
+          if (letters(again) > letters(text)) text = again;
+        }
+        texts.push(text);
         // A new upload replaced this one while it was being read; its own job will run.
         const saved = await this.prisma.scriptUpload.updateMany({ where: { id, uploadedAt: upload.uploadedAt }, data: { pageTexts: texts } });
         if (!saved.count) return;

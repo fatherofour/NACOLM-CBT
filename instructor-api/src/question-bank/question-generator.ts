@@ -3,6 +3,8 @@
 // new question tests course content the department has already set, not
 // whatever the model happens to know.
 
+import { firstJsonObject } from '../theory-scripts/marking.js';
+
 export interface SeedQuestion {
   body: string;
   topic: string;
@@ -39,7 +41,7 @@ Respond with ONLY JSON of this exact shape:
 }
 
 export function parseGenerated(raw: string, fallbackMarks: number): GeneratedQuestion {
-  const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? raw;
+  const jsonText = firstJsonObject(raw);
   const d = JSON.parse(jsonText) as { question?: unknown; marks?: unknown; modelAnswer?: unknown };
   const body = String(d.question ?? '').replace(/\s+/g, ' ').trim();
   const modelAnswer = String(d.modelAnswer ?? '').trim();
